@@ -1,4 +1,4 @@
-import { roles, states, kinds, outcomes, canReview, mutate, view } from './lab-core.mjs';
+import { roles, states, kinds, outcomes, canReview, mutate, view, deviceLabels, purchaseLabels } from './lab-core.mjs';
 import { sample } from './lab-demo.mjs';
 
 const glyphs = {
@@ -255,9 +255,9 @@ function filteredDevices() {
     && (!(filters.state || filters.location) || d.units.some(u => (!filters.state || u.state === filters.state)
       && (!filters.location || (u.location || d.location) === filters.location)))
     && (!filters.project || d.project === filters.project)
-    && (!query || [d.title, d.code, d.buyer, d.location, d.project, d.note, ...d.units.flatMap(u => [
-      u.code, u.location, u.userName, u.issue, u.note,
-    ])].some(value => String(value).toLowerCase().includes(query))));
+    && (!query || [d.title, d.code, d.buyer, d.location, d.project, d.note, d.managerName, d.purchaseApprover,
+      d.fundingProject, d.purchasedOn, ...d.units.flatMap(u => [u.code, u.location, u.userName, u.issue, u.note,
+        ...Object.values(u.purchase || {})])].some(value => String(value ?? '').toLowerCase().includes(query))));
 }
 function summary() {
   const available = data.devices.filter(d => !d.archived);
@@ -267,7 +267,7 @@ function summary() {
     return m;
   }, { total: 0, idle: 0, use: 0, fault: 0 });
   return '<div class="metrics" aria-label="台账概览">'
-    + [['total', '设备总数', 'box', available.length + ' 种设备'], ['idle', '空闲', 'check', '可申请使用'],
+    + [['total', '设备总数', 'box', available.length + ' 种设备'], ['idle', '空闲', 'check', '可取用或申请'],
       ['use', '使用中', 'activity', '已分配使用人'], ['fault', '异常', 'alert', '待检查或维护']].map(([key, label, sym, hint]) =>
       '<button type="button" class="metric' + (filters.state === key ? ' metric-active' : '') + '" data-action="metric" data-id="' + key + '">'
       + '<div class="metric-top"><span class="metric-icon ' + key + '">' + icon(sym, 21) + '</span><span>' + label + '</span></div>'
@@ -291,24 +291,40 @@ function groupedStatus(d) {
   const present = Object.keys(counts).filter(key => counts[key] > 0);
   return present.map(key => badge(key, states[key] + (present.length > 1 ? ' ' + counts[key] : ''))).join('');
 }
+function unitAction(d, u) {
+  if (d.archived) return '';
+  const attrs = keyed(d, u);
+  if (u.state === 'idle') {
+    return d.quickUse ? button('临时取用', null, 'quick-borrow', attrs, 'btn-flat')
+      : button('长期申请', null, 'borrow', attrs, 'btn-flat');
+  }
+  if (u.state !== 'use' || u.userId !== data.user.id) return '';
+  return u.loanMode === 'quick' ? button('直接归还', null, 'quick-return', attrs, 'btn-flat')
+    : button('申请归还', null, 'return', attrs, 'btn-flat');
+}
+function loanLabel(u) {
+  return u.loanMode === 'quick' ? '临时取用' : u.loanMode === 'long' ? '长期使用' : '领用';
+}
 function unitRows(d) {
   return '<tr class="expanded-row"><td colspan="8"><div class="unit-panel"><p class="units-title">单件明细 <span>' + d.units.length + ' 件</span></p>'
     + d.units.map(u =>
       '<div class="unit-row"><span class="unit-code">' + esc(u.code) + '</span><span>' + badge(u.state, states[u.state]) + '</span>'
       + '<div class="unit-context"><strong>' + esc(u.state === 'use' ? u.userName : u.state === 'fault' ? u.issue : u.location || d.location) + '</strong>'
-      + '<small>' + esc([u.state === 'use' ? '领用 ' + prettyTime(u.since) : '', u.state !== 'idle' ? (u.location || d.location) : '', u.note].filter(Boolean).join(' · ')) + '</small></div>'
-      + '<div class="unit-actions">' + (!d.archived && u.state === 'idle' ? button('申请使用', null, 'borrow', keyed(d, u), 'btn-flat')
-        : !d.archived && u.userId === data.user.id ? button('申请归还', null, 'return', keyed(d, u), 'btn-flat') : '')
-      + (!d.archived ? tool('单件操作', 'more', 'unit-menu', keyed(d, u)) : '') + '</div></div>').join('') + '</div></td></tr>';
+      + '<small>' + esc([u.state === 'use' ? loanLabel(u) + ' ' + prettyTime(u.since) : '', u.dueOn ? '预计归还 ' + u.dueOn : '',
+        u.state !== 'idle' ? (u.location || d.location) : '', u.note].filter(Boolean).join(' · ')) + '</small></div>'
+      + '<div class="unit-actions">' + unitAction(d, u) + tool('单件详情与操作', 'more', 'unit-menu', keyed(d, u))
+      + '</div></div>').join('') + '</div></td></tr>';
 }
 function deviceRow(d) {
   const open = expanded.has(d.id);
   return '<tr class="device-row"><td class="expander-cell"><button type="button" class="expander' + (open ? ' open' : '') + '" data-action="expand" '
     + keyed(d) + ' aria-expanded="' + open + '" aria-label="' + (open ? '收起' : '展开') + esc(d.title) + '单件">' + icon('right', 15) + '</button></td>'
     + '<td><button type="button" class="device-name" data-action="expand" ' + keyed(d) + '><span class="device-icon">' + icon(equipmentGlyph(d.title), 20) + '</span>'
-    + '<span><strong>' + esc(d.title) + '</strong><small>' + esc(d.code) + '</small></span></button></td>'
+    + '<span><strong>' + esc(d.title) + '</strong><small>' + esc(d.code + (d.managerName ? ' · 管理员 ' + d.managerName : '')) + '</small></span></button></td>'
     + '<td data-label="状态"><div class="table-badges">' + groupedStatus(d) + '</div></td><td data-label="数量"><span class="count-cell">' + d.units.length + '</span></td>'
-    + '<td data-label="购买人">' + esc(d.buyer) + '</td><td data-label="位置">' + esc(d.location) + '</td><td data-label="项目"><span class="project-tag">' + esc(d.project) + '</span></td>'
+    + '<td data-label="购买人"><button type="button" class="purchase-link" data-action="purchase" ' + keyed(d)
+    + ' title="查看采购详情" aria-label="' + esc(d.title + '采购详情 · 购买人 ' + d.buyer) + '">' + esc(d.buyer) + '</button></td>'
+    + '<td data-label="位置">' + esc(d.location) + '</td><td data-label="项目"><span class="project-tag">' + esc(d.project) + '</span></td>'
     + '<td class="row-action">' + tool('设备详情与操作', 'more', 'device-menu', keyed(d)) + '</td></tr>' + (open ? unitRows(d) : '');
 }
 function pagination(count, current, action, unit = '条记录') {
@@ -333,7 +349,7 @@ function devicesPage() {
     + '<section class="panel inventory" aria-label="设备清单"><div class="panel-heading"><div><h2>' + (inArchive ? '已归档设备' : '设备清单')
     + '</h2><span class="small-count">' + visible.length + ' 种</span></div>'
     + (data.user.role === 'super' ? button(inArchive ? '返回设备清单' : '查看归档', 'archive', 'archive-toggle', '', 'btn-flat') : '') + '</div>'
-    + '<div class="filters">' + searchBox('devices', filters.q, '搜索设备、编号、购买人…') + '<div class="filter-selects">'
+    + '<div class="filters">' + searchBox('devices', filters.q, '搜索设备、人员、项目…') + '<div class="filter-selects">'
     + selectFilter('state', '状态', [['', '全部状态'], ...Object.entries(states)])
     + selectFilter('project', '项目', [['', '全部项目'], ...projectOptions.map(v => [v, v])])
     + selectFilter('location', '位置', [['', '全部位置'], ...locations.map(v => [v, v])])
@@ -436,18 +452,43 @@ function modal(title, description, content, footer = '', form = '') {
 }
 const confirmButton = label => '<button type="submit" class="btn primary">' + esc(label) + '</button>';
 const cancelButton = button('取消', null, 'close-modal');
+function procurementFields(p = {}) {
+  return field(purchaseLabels.buyer, 'buyer', p.buyer, { max: 60 })
+    + field(purchaseLabels.purchasedOn, 'purchasedOn', p.purchasedOn, { type: 'date', required: false })
+    + field(purchaseLabels.purchaseApprover, 'purchaseApprover', p.purchaseApprover, { max: 60, required: false })
+    + field(purchaseLabels.fundingProject, 'fundingProject', p.fundingProject, { max: 100, required: false });
+}
+function procurementRows(p) {
+  return Object.entries(purchaseLabels).map(([key, label]) => [label, p[key]]);
+}
+function purchaseDetails(d, u) {
+  const overrides = u ? [] : d.units.filter(unit => unit.purchase);
+  const details = definition([...procurementRows(u?.purchase || d), ['所属项目', d.project],
+    ...(u ? [['记录来源', u.purchase ? '单件采购记录' : '整组采购记录']] : [])]);
+  const separate = overrides.length ? '<section class="purchase-overrides"><h3>另有单件采购记录</h3><div>'
+    + overrides.map(unit => button(unit.code, 'file', 'purchase', keyed(d, unit), 'btn-flat')).join('') + '</div></section>' : '';
+  modal(u ? '单件采购详情' : '采购详情', d.title + ' · ' + (u?.code || d.code), details + separate,
+    (u ? button('整组采购详情', 'file', 'purchase', keyed(d)) : '') + button('关闭', null, 'close-modal'));
+}
 function deviceForm(d) {
   dialogData = { d };
   const adding = !d;
   const direct = adding ? canReview(data.user) : data.user.role === 'super';
   const title = adding ? (direct ? '新增设备' : '申请新增设备') : direct ? '编辑设备' : '申请修改设备';
+  const managers = [['', '暂未指定'], ...(data.managers || []).map(manager => [manager.id, manager.name])];
+  if (d?.managerId && !managers.some(([id]) => id === d.managerId)) {
+    managers.push([d.managerId, (d.managerName || '原管理员') + '（暂不可选用）']);
+  }
   const content = '<div class="form-grid">'
     + field('设备名称', 'title', d?.title, { max: 100, wide: true, placeholder: '填写型号或常用名称' })
-    + field('购买人', 'buyer', d?.buyer || data.user.name, { max: 60 })
     + field('数量', 'count', d?.units.length || 1, { type: 'number' })
     + field('存放位置', 'location', d?.location, { max: 100, placeholder: '如 A区 · 试验台 01' })
     + field('所属项目', 'project', d?.project, { max: 100, placeholder: '填写所属项目' })
+    + field('设备管理员', 'managerId', d?.managerId, { choices: managers, required: false })
+    + field('临时取用', 'quickUse', d?.quickUse ? 'yes' : 'no', { wide: true, choices: [['no', '长期使用需审批'], ['yes', '小件 · 临时取用免审批']] })
     + field('备注', 'note', d?.note, { area: true, wide: true, required: false })
+    + '<section class="wide record-fields"><h3>采购信息</h3><div class="form-grid">'
+    + procurementFields({ ...d, buyer: d?.buyer || data.user.name }) + '</div></section>'
     + (!direct ? field('申请说明', 'reason', '', { area: true, wide: true, max: 350, required: !adding }) : '')
     + '</div>' + (!adding ? '<p class="form-hint">增加数量会生成新的单件编号。减少数量会按编号由大到小移出空闲单件。</p>' : '');
   modal(title, adding ? '登记后，系统会为每件实物生成独立编号。' : d.code + ' · ' + d.title, content,
@@ -455,22 +496,26 @@ function deviceForm(d) {
 }
 function deviceMenu(d) {
   const attrs = keyed(d);
-  const items = d.archived
+  const items = button('采购详情', 'file', 'purchase', attrs) + (d.archived
     ? button('恢复设备', 'archive', 'restore-device', attrs, 'primary')
     : button(data.user.role === 'super' ? '编辑设备' : '申请修改', 'pencil', 'edit-device', attrs)
       + (data.user.role === 'super' ? button('归档', 'archive', 'archive-device', attrs) : '')
-      + (d.units.some(u => u.state === 'idle') ? button('申请使用', 'plus', 'borrow', attrs, 'primary') : '');
-  modal(d.title, d.code, definition([['购买人', d.buyer], ['数量', String(d.units.length) + ' 件'], ['存放位置', d.location], ['所属项目', d.project], ['备注', d.note]])
+      + (d.units.some(u => u.state === 'idle')
+        ? (d.quickUse ? button('临时取用', 'plus', 'quick-borrow', attrs) : '') + button('长期使用申请', null, 'borrow', attrs, 'primary') : ''));
+  modal(d.title, d.code, definition([['购买人', d.buyer], ['数量', String(d.units.length) + ' 件'], ['存放位置', d.location],
+    ['所属项目', d.project], ['设备管理员', d.managerName], ['临时取用', d.quickUse ? '免审批' : '长期使用需审批'], ['备注', d.note]])
     + '<div class="detail-badges">' + groupedStatus(d) + '</div>', items);
 }
 function unitMenu(d, u) {
   const attrs = keyed(d, u);
-  const items = button(data.user.role === 'super' ? '编辑单件' : '申请修改单件', 'pencil', 'unit-edit', attrs)
+  const items = button('采购详情', 'file', 'purchase', attrs) + (d.archived ? '' :
+    button(data.user.role === 'super' ? '编辑单件' : '申请修改单件', 'pencil', 'unit-edit', attrs)
     + button('申报异常', 'alert', 'fault', attrs)
-    + (u.state === 'idle' ? button('申请使用', 'plus', 'borrow', attrs, 'primary') : u.state === 'use' && u.userId === data.user.id
-      ? button('申请归还', 'check', 'return', attrs, 'primary') : '');
+    + (u.state === 'idle' ? (d.quickUse ? button('临时取用', 'plus', 'quick-borrow', attrs) : '')
+      + button('长期使用申请', null, 'borrow', attrs, 'primary') : unitAction(d, u)));
   modal(u.code, d.title, definition([['状态', states[u.state]], ['存放位置', u.location || d.location],
-    ...(u.state === 'use' ? [['使用人', u.userName], ['开始时间', prettyTime(u.since, true)]] : []),
+    ...(u.state === 'use' ? [['使用人', u.userName], ['使用方式', loanLabel(u)], ['开始时间', prettyTime(u.since, true)],
+      ...(u.dueOn ? [['预计归还日期', u.dueOn]] : [])] : []),
     ...(u.state === 'fault' ? [['异常情况', u.issue]] : []), ['备注', u.note]]), items);
 }
 function unitForm(kind, d, u) {
@@ -486,10 +531,13 @@ function unitForm(kind, d, u) {
       return;
     }
     content += field('领用单件', 'unitId', u?.id || '', { wide: true, choices: [['', '请选择空闲单件'], ...available.map(x => [x.id, x.code + ' · ' + (x.location || d.location)])] });
+    content += field('预计归还日期', 'dueOn', '', { wide: true, type: 'date', required: false });
   }
   if (kind === 'unit') {
     content += field('单件位置', 'location', u.location, { wide: true, required: false, placeholder: '留空时沿用整组设备位置', max: 100 })
-      + field('单件备注', 'note', u.note, { area: true, wide: true, required: false });
+      + field('单件备注', 'note', u.note, { area: true, wide: true, required: false })
+      + field('采购记录', 'purchaseMode', u.purchase ? 'unit' : 'group', { wide: true, choices: [['group', '沿用整组采购信息'], ['unit', '填写单件采购信息']] })
+      + '<div class="form-grid wide needs-purchase">' + procurementFields(u.purchase || d) + '</div>';
     if (direct) {
       content += field('状态', 'state', u.state, { wide: true, choices: Object.entries(states) })
         + '<div class="wide needs-holder" ' + (u.state === 'use' ? '' : 'hidden') + '>'
@@ -504,7 +552,7 @@ function unitForm(kind, d, u) {
     placeholder: kind === 'borrow' ? '填写实验用途' : kind === 'return' ? '填写归还说明，例如已清洁并放回原位' : '说明需要修改的原因' });
   modal(direct ? '编辑单件' : kinds[kind], d.title + (u ? ' · ' + u.code : ''), '<div class="form-grid">' + content + '</div>',
     cancelButton + confirmButton(direct ? '保存修改' : '提交申请'), 'unit');
-  if (direct) syncUnitForm();
+  if (kind === 'unit') syncUnitForm();
 }
 function syncUnitForm() {
   const state = dialog.querySelector('select[name=state]')?.value;
@@ -515,6 +563,22 @@ function syncUnitForm() {
       box.querySelector('[name=' + name + ']').disabled = box.hidden;
     }
   }
+  const purchaseBox = dialog.querySelector('.needs-purchase');
+  if (purchaseBox) {
+    purchaseBox.hidden = dialog.querySelector('[name=purchaseMode]').value !== 'unit';
+    for (const control of purchaseBox.querySelectorAll('input')) control.disabled = purchaseBox.hidden;
+  }
+}
+
+function quickForm(action, d, u) {
+  const borrowing = action === 'quick-borrow';
+  const title = borrowing ? '临时取用' : '临时归还';
+  dialogData = { d, u, action };
+  const content = u ? definition([['单件编号', u.code], ['存放位置', u.location || d.location]])
+    : '<div class="form-grid">' + field('空闲单件', 'unitId', '', { wide: true,
+      choices: [['', '请选择空闲单件'], ...d.units.filter(unit => unit.state === 'idle')
+        .map(unit => [unit.id, unit.code + ' · ' + (unit.location || d.location)])] }) + '</div>';
+  modal(title, d.title, content, cancelButton + confirmButton(borrowing ? '登记取用' : '确认归还'), 'quick');
 }
 
 function requestDetail(r) {
@@ -523,17 +587,26 @@ function requestDetail(r) {
   const canAct = canReview(data.user) && (!isOwn || data.user.role === 'super');
   const pending = r.status === 'pending';
   let fields = [['申请人', r.author], ['提交时间', prettyTime(r.time, true)], ['审核状态', outcomes[r.status]]];
+  if (d?.managerName && r.kind !== 'edit') fields.push(['设备管理员', d.managerName]);
+  if (r.kind === 'borrow' && r.payload.dueOn) fields.push(['预计归还日期', r.payload.dueOn]);
   if (r.reason) fields.push(['申请说明', r.reason]);
   if (r.comment || r.reviewer) fields.push(['审核人', r.reviewer], ['审核意见', r.comment], ['处理时间', prettyTime(r.closed, true)]);
   if (r.kind === 'add' || r.kind === 'edit') {
     const p = r.payload;
-    const info = [['title', '设备名称'], ['buyer', '购买人'], ['count', '数量'], ['location', '位置'], ['project', '项目'], ['note', '备注']];
     const before = d ? { ...d, count: d.units.length } : null;
-    const formFields = info.filter(([key]) => r.kind === 'add' || !pending || !before || before[key] !== p[key]);
-    fields = fields.concat(formFields.map(([key, label]) => [label, r.kind === 'edit' && pending && before ? (before[key] || '—') + ' → ' + (p[key] || '—') : p[key]]));
+    const display = (key, value) => key === 'quickUse' ? value ? '免审批' : '需审批' : key === 'managerId'
+      ? (data.managers || []).find(manager => manager.id === value)?.name || (value && value === d?.managerId ? d.managerName : '') || '—' : value || '—';
+    const formFields = Object.entries(deviceLabels).filter(([key]) => Object.hasOwn(p, key)
+      && (r.kind === 'add' || !pending || !before || display(key, before[key]) !== display(key, p[key])));
+    fields = fields.concat(formFields.map(([key, label]) => [label,
+      r.kind === 'edit' && pending && before ? display(key, before[key]) + ' → ' + display(key, p[key]) : display(key, p[key])]));
   }
   if (r.kind === 'fault') fields.push(['异常情况', r.payload.issue]);
   if (r.kind === 'unit') fields.push(['拟修改位置', r.payload.location || '沿用整组位置'], ['拟修改备注', r.payload.note]);
+  if (r.kind === 'unit' && Object.hasOwn(r.payload, 'purchase')) {
+    fields.push(['采购记录', r.payload.purchase ? '单件采购信息' : '沿用整组采购信息']);
+    if (r.payload.purchase) fields.push(...procurementRows(r.payload.purchase));
+  }
   const revoke = pending && (isOwn || data.user.role === 'super') ? button('撤回申请', null, 'request-cancel', 'data-id="' + esc(r.id) + '"') : '';
   dialogData = { r };
   modal(kinds[r.kind], r.target, definition(fields) + (canAct && pending ? '<div class="form-grid review-field">'
@@ -594,12 +667,16 @@ function exportCsv() {
     const plain = String(value ?? '');
     return '"' + (/^[\s]*[=+\-@\t\r]/.test(plain) ? "'" + plain : plain).replaceAll('"', '""') + '"';
   };
-  const rows = [['设备名称', '设备组编号', '组内数量', '单件编号', '购买人', '状态', '使用人', '异常情况', '存放位置', '所属项目', '设备备注', '单件备注']];
+  const rows = [['设备名称', '设备组编号', '组内数量', '单件编号', '购买人', '状态', '使用人', '异常情况', '存放位置', '所属项目',
+    '设备备注', '单件备注', '购买日期', '购买审批人', '采购经费项目', '设备管理员', '使用方式', '预计归还日期']];
   for (const d of records) {
     for (const u of d.units) {
       if (filters.state && u.state !== filters.state) continue;
       if (filters.location && (u.location || d.location) !== filters.location) continue;
-      rows.push([d.title, d.code, d.units.length, u.code, d.buyer, states[u.state], u.userName, u.issue, u.location || d.location, d.project, d.note, u.note]);
+      const p = u.purchase || d;
+      rows.push([d.title, d.code, d.units.length, u.code, p.buyer, states[u.state], u.userName, u.issue, u.location || d.location,
+        d.project, d.note, u.note, p.purchasedOn, p.purchaseApprover, p.fundingProject, d.managerName,
+        u.state === 'use' ? loanLabel(u) : '', u.dueOn]);
     }
   }
   if (rows.length === 1) return toast('当前筛选条件下没有可导出的单件', true);
@@ -664,6 +741,8 @@ document.addEventListener('click', event => {
     case 'edit-device': deviceForm(d); break;
     case 'device-menu': deviceMenu(d); break;
     case 'unit-menu': unitMenu(d, u); break;
+    case 'purchase': purchaseDetails(d, u); break;
+    case 'quick-borrow': case 'quick-return': quickForm(action, d, u); break;
     case 'borrow': case 'return': case 'fault': unitForm(action, d, u); break;
     case 'unit-edit': unitForm('unit', d, u); break;
     case 'archive-device': confirmation('archive', d, '归档后设备将移出当前清单，可在归档页恢复。', '归档设备'); break;
@@ -706,7 +785,7 @@ document.addEventListener('change', event => {
     viewPage = 1;
     render();
   }
-  if (element.name === 'state' && element.closest('dialog')) syncUnitForm();
+  if (['state', 'purchaseMode'].includes(element.name) && element.closest('dialog')) syncUnitForm();
 });
 document.addEventListener('submit', event => {
   const form = event.target;
@@ -716,6 +795,7 @@ document.addEventListener('submit', event => {
   if (form.dataset.auth) return write(form.dataset.auth, p, form.dataset.auth === 'setup' ? '已创建超级管理员' : '');
   const { d, u, r, kind, direct, action } = dialogData;
   if (form.dataset.form === 'device') {
+    p.quickUse = p.quickUse === 'yes';
     if (d) Object.assign(p, { deviceId: d.id, version: d.version });
     const canWrite = d ? data.user.role === 'super' : canReview(data.user);
     return canWrite ? write(d ? 'edit' : 'add', p, '设备台账已更新')
@@ -725,6 +805,9 @@ document.addEventListener('submit', event => {
     Object.assign(p, { deviceId: d.id, unitId: p.unitId || u?.id, version: u?.version });
     return direct ? write('unit', p, '单件信息已保存')
       : write('request', { kind, payload: p }, '申请已提交，等待审核');
+  }
+  if (form.dataset.form === 'quick') {
+    return write(action, { deviceId: d.id, unitId: p.unitId || u?.id }, action === 'quick-borrow' ? '已登记临时取用' : '已归还');
   }
   if (form.dataset.form === 'review') {
     const result = event.submitter?.value;

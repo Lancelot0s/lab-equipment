@@ -20,17 +20,23 @@ export function sample() {
     ['光学显微镜', '周宁', 2, 'A区 · 光学测量室', '光谱分析', ''],
     ['便携式数据采集仪', '何明', 3, 'C区 · 仪器柜 01', '材料表征', '配套信号线存放在仪器柜'],
   ];
-  for (const [title, buyer, count, location, project, note] of assets) {
-    mutate(s, admin, 'add', { title, buyer, count, location, project, note });
+  for (const [index, [title, buyer, count, location, project, note]] of assets.entries()) {
+    mutate(s, admin, 'add', { title, buyer, count, location, project, note,
+      purchasedOn: '2026-09-' + String(10 + index), purchaseApprover: superuser.name,
+      fundingProject: index === 0 ? '实验室仪器平台建设' : project,
+      managerId: admin.id, quickUse: index === 5 });
   }
   s.devices.reverse();
   const offset = (days, hours = 0) => new Date(Date.now() - (days * 24 + hours) * 3_600_000).toISOString();
   for (const [index, holder, days] of [[0, member, 0], [2, zhou, 1], [3, wu, 1], [5, admin, 2], [7, zhou, 3]]) {
     const unit = s.devices[index].units[0];
-    Object.assign(unit, { state: 'use', userId: holder.id, since: offset(days, 2) });
+    Object.assign(unit, { state: 'use', userId: holder.id, since: offset(days, 2),
+      loanMode: index === 5 ? 'quick' : 'long', dueOn: index === 5 ? '' : offset(-7).slice(0, 10) });
   }
   s.devices[0].units[1].location = 'A区 · 试验台 02';
   s.devices[0].units[1].note = '已完成校准';
+  s.devices[0].units[1].purchase = { buyer: '周宁', purchasedOn: '2026-10-12',
+    purchaseApprover: superuser.name, fundingProject: '材料测试补充经费' };
   Object.assign(s.devices[4].units[0], { state: 'fault', issue: '运行时出现异常振动，待检查泵体。' });
   Object.assign(s.devices[6].units[0], { state: 'fault', issue: '目镜调焦卡滞，待维护。' });
   for (const h of s.history) h.time = offset(6);
@@ -38,6 +44,7 @@ export function sample() {
   const d = s.devices[1];
   mutate(s, zhou, 'request', { kind: 'edit', payload: { ...d, deviceId: d.id, count: 4, reason: '同型号新采购一台，补充设备数量' } });
   const balance = s.devices[0];
-  mutate(s, member, 'request', { kind: 'borrow', payload: { deviceId: balance.id, unitId: balance.units[1].id, reason: '称量材料表征实验样品' } });
+  mutate(s, member, 'request', { kind: 'borrow', payload: { deviceId: balance.id, unitId: balance.units[1].id,
+    reason: '称量材料表征实验样品', dueOn: offset(-4).slice(0, 10) } });
   return s;
 }
