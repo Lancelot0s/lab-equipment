@@ -6,10 +6,12 @@
 
 ## 运行正式台账
 
-安装 Node.js 24 或更新版本。在 Windows 双击 `Start.cmd`，或执行 `node local.mjs`，然后访问 `http://127.0.0.1:8787`。首次启动时，用服务窗口显示的初始化代码创建超级管理员。之后由超级管理员为成员创建账号，成员使用邮箱和分配的密码登录。
+安装 Node.js 24 或更新版本。在 Windows 双击 `Start.cmd`，或执行 `node local.mjs`，然后访问 `http://127.0.0.1:8787`。首次启动时，用服务窗口显示的初始化代码创建超级管理员。之后由超级管理员为成员创建账号，成员使用用户名和密码登录。
 
 正式数据库位于 `data/lab.sqlite`。多人共用时，将服务运行在一台常开电脑或服务器上，用 HTTPS 反向代理转发到服务端口，并将服务的 `LAB_ORIGIN` 设置为完整的 HTTPS 源地址。备份时先停止服务，再复制 `data` 目录。
 
+Linux 也可运行 `server-linux.py`。它使用现有 Python 3.8 及以上版本和系统 JavaScriptCore 4.0 库。在需要直接提供 HTTPS 时，将 `LAB_HOST`、`LAB_PORT`、`LAB_ORIGIN` 配置为服务地址，并设置 `LAB_TLS_CERT`、`LAB_TLS_KEY` 为证书与私钥的绝对路径。服务器私钥与数据库保存在实验室服务器上。
+
 ## 发布 GitHub Pages
 
-以 `main` 分支的 `/docs` 为发布来源。把 `docs/index.html` 中 `lab-workspace-url` 的值填写为正式服务的 HTTPS 地址，演示页面的头像菜单会显示「进入正式工作台」。
+以 `main` 分支的 `/docs` 为发布来源。将浏览器可访问的正式 HTTPS 地址填入 `docs/index.html` 的 `lab-workspace-url` 后，页面上的「正式台账」将直接打开登录页。正式账号和设备数据保存在实验室服务器。

@@ -118,7 +118,7 @@ async function api(req, res) {
     const result = records(state => {
       if (state.users.length) fail('该系统已完成初始化', 409);
       const provisional = { id: 'bootstrap', name: '系统初始化', role: 'super' };
-      mutate(state, provisional, 'account', { name: p.name, email: p.email, role: 'super', credential: passwordHash(p.password) });
+      mutate(state, provisional, 'account', { name: p.name, email: p.email, username: p.username, role: 'super', credential: passwordHash(p.password) });
       const user = state.users[0];
       user.owner = true;
       setSession(res, user);
@@ -129,9 +129,10 @@ async function api(req, res) {
   if (action === 'login') {
     throttle(req);
     const state = before();
-    const email = typeof p.email === 'string' ? p.email.trim().toLowerCase() : '';
-    const user = state.users.find(u => u.email === email);
-    if (!verify(p.password, user?.credential) || !user || user.disabled || !user.credential) fail('邮箱或密码不正确，或账号已停用', 401);
+    const entered = p.username ?? p.email;
+    const username = typeof entered === 'string' ? entered.trim().toLowerCase() : '';
+    const user = state.users.find(u => (u.username || u.email) === username);
+    if (!verify(p.password, user?.credential) || !user || user.disabled || !user.credential) fail('用户名或密码不正确，或账号已停用', 401);
     attempts.delete(req.socket.remoteAddress || 'unknown');
     setSession(res, user);
     return response(res, { mode, ...view(state, user) });

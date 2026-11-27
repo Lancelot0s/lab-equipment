@@ -240,14 +240,20 @@ export function mutate(s, user, action, body = {}) {
     return;
   }
   if (action === 'account') {
-    const email = field(p.email, '登录账号', 160).toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail('请输入有效的电子邮箱');
     const displayName = field(p.name, '姓名', 60);
     if (!own(roles, p.role)) fail('请选择有效的用户角色');
     const account = p.id ? person(s, p.id) : null;
     if (p.id && !account) fail('找不到该账号', 404);
-    if (!account && s.users.some(u => u.email === email)) fail('该邮箱已经存在', 409);
-    if (account && email !== account.email) fail('已有账号的登录邮箱不可修改');
+    const loginField = p.username === undefined ? 'email' : 'username';
+    const login = field(p[loginField], loginField === 'username' ? '用户名' : '登录邮箱', 160).toLowerCase();
+    if (account && login !== (account.username || account.email)) fail('已有账号的用户名不可修改');
+    if (!account) {
+      if (loginField === 'username' && !/^[a-z0-9][a-z0-9._-]{1,63}$/.test(login)) {
+        fail('用户名须为 2 至 64 个字符，以字母或数字开头，可包含点、下划线或连字符');
+      }
+      if (loginField === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(login)) fail('请输入有效的电子邮箱');
+      if (s.users.some(u => (u.username || u.email) === login)) fail('该用户名已存在', 409);
+    }
     const disabled = p.disabled === true;
     if (account?.id === user.id && (disabled || p.role !== 'super')) fail('请由其他超级管理员调整你的账号', 409);
     if (account?.owner && (disabled || p.role !== 'super')) fail('系统所有者须保留超级管理员权限', 409);
@@ -256,7 +262,7 @@ export function mutate(s, user, action, body = {}) {
     if (account) {
       Object.assign(account, values);
     } else {
-      s.users.push({ ...values, id: id(), email });
+      s.users.push({ ...values, id: id(), [loginField]: login });
     }
     audit(s, user, account ? '更新账号' : '添加账号', displayName, roles[p.role] + (disabled ? ' · 停用' : ' · 启用') + (account && p.credential ? ' · 重置密码' : ''));
     return;
@@ -268,7 +274,7 @@ export function view(s, user) {
   if (user.disabled) fail('该账号已停用', 403);
   const staff = canReview(user);
   return {
-    user: { id: user.id, name: user.name, role: user.role, email: user.email },
+    user: { id: user.id, name: user.name, role: user.role, username: user.username || user.email },
     devices: s.devices.filter(d => !d.archived || user.role === 'super')
       .map(d => ({ ...d, units: units(d).map(u => ({ ...u, userName: name(s, u.userId) })) })),
     requests: s.requests.filter(r => staff || r.authorId === user.id),
@@ -276,8 +282,8 @@ export function view(s, user) {
     notices: s.notices.filter(n => n.recipient === user.id).map(n => ({
       ...n, pending: s.requests.some(r => r.id === n.requestId && r.status === 'pending'),
     })),
-    accounts: user.role === 'super' ? s.users.map(({ id, email, name, role, disabled, owner }) => (
-      { id, email, name, role, disabled: Boolean(disabled), owner: Boolean(owner) }
+    accounts: user.role === 'super' ? s.users.map(({ id, username, email, name, role, disabled, owner }) => (
+      { id, username: username || email, name, role, disabled: Boolean(disabled), owner: Boolean(owner) }
     )) : [],
   };
 }

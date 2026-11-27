@@ -232,9 +232,8 @@ function profileMenu() {
         + (u.id === data.user.id ? icon('check', 17) : '<small>' + esc(u.name) + '</small>') + '</button>').join('')
       + (workspaceUrl ? '<div class="menu-divider"></div><a href="' + esc(workspaceUrl) + '">' + icon('switch', 16) + '进入正式工作台</a>' : '') + '</div>';
   }
-  return '<div class="profile-menu"><p>' + esc(data.user.email) + '</p><a href="/?demo=1">' + icon('switch', 16) + '打开演示工作台</a>'
-    + (data.mode === 'sites' ? '<a href="/signout-with-chatgpt?return_to=%2F" target="_top">' + icon('logout', 16) + '退出登录</a>'
-      : '<button type="button" data-action="logout">' + icon('logout', 16) + '退出登录</button>') + '</div>';
+  return '<div class="profile-menu"><p>' + esc(data.user.username) + '</p><a href="/?demo=1">' + icon('switch', 16) + '打开演示工作台</a>'
+    + '<button type="button" data-action="logout">' + icon('logout', 16) + '退出登录</button></div>';
 }
 function titleBlock(title, subtitle, actions = '') {
   return '<div class="page-title"><div><h1>' + title + '</h1><p>' + subtitle + '</p></div><div class="page-actions">' + actions + '</div></div>';
@@ -326,7 +325,8 @@ function devicesPage() {
   const active = data.devices.filter(d => Boolean(d.archived) === inArchive);
   const projectOptions = [...new Set(active.map(d => d.project))].sort((a, b) => a.localeCompare(b, 'zh'));
   const locations = [...new Set(active.flatMap(d => [d.location, ...d.units.map(u => u.location).filter(Boolean)]))].sort((a, b) => a.localeCompare(b, 'zh'));
-  const actions = button('导出清单', 'download', 'export') + button(canReview(data.user) ? '新增设备' : '申请新增设备', 'plus', 'new-device', '', 'primary');
+  const workspace = pages ? '<a class="btn" href="' + esc(workspaceUrl || './connection.html') + '">' + icon('switch', 16) + '正式台账</a>' : '';
+  const actions = workspace + button('导出清单', 'download', 'export') + button(canReview(data.user) ? '新增设备' : '申请新增设备', 'plus', 'new-device', '', 'primary');
   const hasFilters = filters.q || filters.state || filters.project || filters.location;
   return titleBlock('设备台账', '查看设备存量、单件状态和当前使用情况。', actions) + summary()
     + '<section class="panel inventory" aria-label="设备清单"><div class="panel-heading"><div><h2>' + (inArchive ? '已归档设备' : '设备清单')
@@ -386,15 +386,15 @@ function historyPage() {
 }
 function accountsPage() {
   const query = listFilter.q.trim().toLowerCase();
-  const records = data.accounts.filter(u => matches(query, [u.name, u.email, roles[u.role]]));
-  const table = rows => '<table class="standard-table"><thead><tr><th>姓名</th><th>登录邮箱</th><th>角色</th><th>账号状态</th><th>操作</th></tr></thead><tbody>'
+  const records = data.accounts.filter(u => matches(query, [u.name, u.username, roles[u.role]]));
+  const table = rows => '<table class="standard-table"><thead><tr><th>姓名</th><th>用户名</th><th>角色</th><th>账号状态</th><th>操作</th></tr></thead><tbody>'
     + rows.map(u => '<tr><td><span class="account-name"><span class="avatar">' + initial(u.name) + '</span><strong>' + esc(u.name) + '</strong></span></td>'
-      + '<td>' + esc(u.email) + '</td><td>' + roles[u.role] + (u.owner ? '<small>系统所有者</small>' : '') + '</td><td>'
+      + '<td>' + esc(u.username) + '</td><td>' + roles[u.role] + (u.owner ? '<small>系统所有者</small>' : '') + '</td><td>'
       + badge(u.disabled ? 'fault' : 'idle', u.disabled ? '已停用' : '已启用') + '</td><td>'
       + button('编辑', null, 'account-edit', 'data-id="' + esc(u.id) + '"', 'btn-flat') + '</td></tr>').join('') + '</tbody></table>';
-  return titleBlock('账号管理', data.mode === 'sites' ? '按 ChatGPT 登录邮箱分配实验室角色。开通后，成员可登录正式台账。' : '创建账号、分配角色、停用账号或重置密码。',
+  return titleBlock('账号管理', '创建账号、分配角色、停用账号或重置密码。',
     button('添加账号', 'plus', 'account-new', '', 'primary')) + '<section class="panel"><div class="list-toolbar">'
-    + searchBox('list', listFilter.q, '搜索姓名、邮箱、角色…') + '</div>'
+    + searchBox('list', listFilter.q, '搜索姓名、用户名、角色…') + '</div>'
     + genericRows(records, table, 'users', '暂无账号') + '</section>';
 }
 function noticesPage() {
@@ -543,9 +543,9 @@ function requestDetail(r) {
 function accountForm(u) {
   dialogData = { u };
   const local = data.mode === 'local';
-  modal(u ? '编辑账号' : '添加账号', data.mode === 'sites' ? '成员需使用此邮箱对应的 ChatGPT 账号进入站点。' : '', '<div class="form-grid">'
+  modal(u ? '编辑账号' : '添加账号', '', '<div class="form-grid">'
     + field('姓名', 'name', u?.name, { max: 60, wide: true })
-    + field('登录邮箱', 'email', u?.email, { type: 'email', readonly: !!u, wide: true })
+    + field('用户名', 'username', u?.username, { readonly: !!u, wide: true, placeholder: '例如 zhang_san' })
     + field('角色', 'role', u?.role || 'member', { choices: Object.entries(roles).filter(([k]) => !u?.owner || k === 'super') })
     + field('账号状态', 'enabled', u?.disabled ? 'no' : 'yes', { choices: u?.owner ? [['yes', '启用']] : [['yes', '启用'], ['no', '停用']] })
     + (local ? field(u ? '新密码' : '初始密码', 'password', '', { type: 'password', wide: true, max: 128, required: !u, autocomplete: 'new-password',
@@ -557,17 +557,13 @@ function confirmation(action, d, details, label) {
 }
 function signedOut() {
   const setup = auth?.setup;
-  const local = auth?.mode === 'local';
-  const headline = loadError ? '暂时无法连接' : setup ? '初始化工作台' : local ? '登录工作台' : '进入实验室工作台';
+  const headline = loadError ? '暂时无法连接' : setup ? '初始化工作台' : '登录工作台';
   let content = loadError ? '<p>' + esc(loadError) + '</p>' + button('重新连接', null, 'reload', '', 'primary')
-    : local ? '<form data-auth="' + (setup ? 'setup' : 'login') + '"><div class="form-grid">'
+    : '<form data-auth="' + (setup ? 'setup' : 'login') + '"><div class="form-grid">'
       + (setup ? field('初始化代码', 'code', '', { wide: true, placeholder: '复制服务启动窗口中的代码' }) + field('姓名', 'name', '', { wide: true, max: 60 }) : '')
-      + field('登录邮箱', 'email', '', { wide: true, type: 'email', autocomplete: 'username' })
+      + field('用户名', 'username', '', { wide: true, autocomplete: 'username' })
       + field('密码', 'password', '', { wide: true, type: 'password', autocomplete: setup ? 'new-password' : 'current-password', placeholder: setup ? '至少 10 个字符' : '' })
-      + '</div><p class="form-error" role="alert"></p>' + confirmButton(setup ? '创建超级管理员' : '登录') + '</form>'
-    : '<p>' + esc(auth?.error || '请使用已开通的账号登录。') + '</p>'
-      + (auth?.status !== 403 ? '<a class="btn primary" href="/signin-with-chatgpt?return_to=%2F" target="_top">使用 ChatGPT 登录</a>'
-        : '<a class="btn" href="/signout-with-chatgpt?return_to=%2F" target="_top">切换账号</a>');
+      + '</div><p class="form-error" role="alert"></p>' + confirmButton(setup ? '创建超级管理员' : '登录') + '</form>';
   return '<div class="login-layout"><section class="login-brand"><img src="./lab-mark.svg" width="54" height="54" alt="">'
     + '<div><span>实验室设备管理</span><strong>仪器台账</strong><p>设备登记、单件领用和审批记录。</p></div>'
     + '<div class="login-glyph">' + icon('grid', 285) + '</div></section><main class="login-main"><div class="login-card"><h1>' + headline + '</h1>'

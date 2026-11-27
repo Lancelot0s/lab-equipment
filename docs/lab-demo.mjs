@@ -3,11 +3,11 @@ import { empty, mutate } from './lab-core.mjs';
 export function sample() {
   const s = empty();
   s.users = [
-    { id: 'demo-super', name: '林晓', email: 'lin@example.test', role: 'super', owner: true },
-    { id: 'demo-admin', name: '何明', email: 'he@example.test', role: 'admin' },
-    { id: 'demo-member', name: '陈宇', email: 'chen@example.test', role: 'member' },
-    { id: 'demo-zhou', name: '周宁', email: 'zhou@example.test', role: 'member' },
-    { id: 'demo-wu', name: '吴婷', email: 'wu@example.test', role: 'member' },
+    { id: 'demo-super', name: '林晓', username: 'lin_xiao', role: 'super', owner: true },
+    { id: 'demo-admin', name: '何明', username: 'he_ming', role: 'admin' },
+    { id: 'demo-member', name: '陈宇', username: 'chen_yu', role: 'member' },
+    { id: 'demo-zhou', name: '周宁', username: 'zhou_ning', role: 'member' },
+    { id: 'demo-wu', name: '吴婷', username: 'wu_ting', role: 'member' },
   ];
   const [superuser, admin, member, zhou, wu] = s.users;
   const assets = [
