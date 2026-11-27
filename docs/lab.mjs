@@ -325,7 +325,8 @@ function devicesPage() {
   const active = data.devices.filter(d => Boolean(d.archived) === inArchive);
   const projectOptions = [...new Set(active.map(d => d.project))].sort((a, b) => a.localeCompare(b, 'zh'));
   const locations = [...new Set(active.flatMap(d => [d.location, ...d.units.map(u => u.location).filter(Boolean)]))].sort((a, b) => a.localeCompare(b, 'zh'));
-  const workspace = pages ? '<a class="btn" href="' + esc(workspaceUrl || './connection.html') + '">' + icon('switch', 16) + '正式台账</a>' : '';
+  const workspace = pages ? '<a class="btn" href="' + esc(workspaceUrl || './connection.html') + '">' + icon('switch', 16) + '正式台账</a>'
+    + (workspaceUrl ? '<a class="btn btn-flat" href="./connection.html">首次访问</a>' : '') : '';
   const actions = workspace + button('导出清单', 'download', 'export') + button(canReview(data.user) ? '新增设备' : '申请新增设备', 'plus', 'new-device', '', 'primary');
   const hasFilters = filters.q || filters.state || filters.project || filters.location;
   return titleBlock('设备台账', '查看设备存量、单件状态和当前使用情况。', actions) + summary()
