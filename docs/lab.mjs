@@ -77,6 +77,7 @@ const rowTime = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', mo
 const fullTime = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 const dateLabel = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: 'long', day: 'numeric', weekday: 'long' });
 const prettyTime = (date, full = false) => date ? (full ? fullTime : rowTime).format(new Date(date)) : '—';
+const byName = new Intl.Collator('zh-CN-u-co-stroke');
 const page = () => {
   const choice = location.hash.slice(1) || 'devices';
   if (!Object.hasOwn(titles, choice) || (choice === 'accounts' && data?.user.role !== 'super')
@@ -208,13 +209,14 @@ function shell(content) {
   const pending = data.requests.filter(r => r.status === 'pending' && canReviewRequest(user, r)).length;
   const unread = data.notices.filter(n => !n.read).length;
   return '<div class="layout"><aside class="sidebar' + (mobileOpen ? ' mobile-open' : '') + '">'
-    + '<a class="brand" href="#devices"><img src="./lab-mark.svg" width="42" height="42" alt=""><span><strong>仪器台账</strong><small>实验室设备管理</small></span></a>'
+    + '<a class="brand" href="#devices" aria-label="常志勇课题组资产与耗材数字化管理平台"><img src="./lab-mark.svg" width="42" height="42" alt="">'
+    + '<span><small>常志勇课题组</small><strong>资产与耗材数字化管理平台</strong></span></a>'
     + '<nav aria-label="主导航"><div class="nav-group"><div class="nav-label">工作台</div>'
     + navItem('devices', 'grid') + navItem('mine', 'file') + (canReview(user) ? navItem('approvals', 'checkList', pending) : '') + navItem('usage', 'chart')
     + '</div><div class="nav-group"><div class="nav-label">管理</div>' + navItem('history', 'history')
     + (user.role === 'super' ? navItem('accounts', 'users') : '') + '</div></nav>'
     + '<div class="sidebar-bottom"><span class="workspace-icon">' + icon('box', 17) + '</span><span><strong>' + (demo ? '演示工作台' : '实验室工作台') + '</strong>'
-    + '<small>' + (demo ? '示例数据空间' : '设备管理系统') + '</small></span></div></aside>'
+    + (demo ? '<small>示例数据空间</small>' : '') + '</span></div></aside>'
     + (mobileOpen ? '<button class="mobile-scrim" data-action="mobile" aria-label="关闭导航"></button>' : '')
     + '<div class="main-shell"><header class="topbar"><div class="breadcrumbs">'
     + '<span class="mobile-toggle">' + tool('打开导航', 'menu', 'mobile') + '</span><span class="crumb-home">工作台</span>'
@@ -557,11 +559,9 @@ function deviceForm(d) {
   const adding = !d;
   const direct = !adding && data.user.role === 'super';
   const title = adding ? '申请新增设备' : direct ? '编辑设备' : '申请修改设备';
-  const byName = new Intl.Collator('zh-CN-u-co-pinyin');
   const candidates = [...(data.managers || [])].sort((a, b) => Number(canReview(b)) - Number(canReview(a))
-    || byName.compare(a.name, b.name) || byName.compare(a.username, b.username));
-  const managers = [['', '暂未指定'], ...candidates.map(manager => [manager.id,
-    manager.name + (manager.username ? '（' + manager.username + '）' : '')])];
+    || byName.compare(a.name, b.name) || a.id.localeCompare(b.id));
+  const managers = [['', '暂未指定'], ...candidates.map(manager => [manager.id, manager.name])];
   if (d?.managerId && !managers.some(([id]) => id === d.managerId)) {
     managers.push([d.managerId, '保留当前负责人']);
   }
@@ -734,7 +734,7 @@ function signedOut() {
       + field('密码', 'password', '', { wide: true, type: 'password', autocomplete: setup ? 'new-password' : 'current-password', placeholder: setup ? '至少 10 个字符' : '' })
       + '</div><p class="form-error" role="alert"></p>' + confirmButton(setup ? '创建超级管理员' : '登录') + '</form>';
   return '<div class="login-layout"><section class="login-brand"><img src="./lab-mark.svg" width="54" height="54" alt="">'
-    + '<div><span>实验室设备管理</span><strong>仪器台账</strong><p>设备登记、单件领用和审批记录。</p></div>'
+    + '<div><span>常志勇课题组</span><strong>资产与耗材<wbr>数字化管理平台</strong><p>设备登记、单件领用和审批记录。</p></div>'
     + '<div class="login-glyph">' + icon('grid', 285) + '</div></section><main class="login-main"><div class="login-card"><h1>' + headline + '</h1>'
     + content + '<a class="demo-link" href="/?demo=1">' + icon('switch', 17) + ' 进入演示工作台</a></div></main></div>';
 }

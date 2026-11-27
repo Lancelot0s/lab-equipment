@@ -425,7 +425,7 @@ export function view(s, user) {
   const assignedNotices = new Set(s.notices.filter(n => n.recipient === user.id).map(n => n.requestId));
   return {
     user: identity,
-    managers: s.users.filter(canAssignDevice).map(({ id, name, username, email, role }) => ({ id, name, username: username || email, role })),
+    managers: s.users.filter(canAssignDevice).map(({ id, name, role }) => ({ id, name, role })),
     devices: s.devices.filter(d => !d.archived || user.role === 'super')
       .map(d => ({ ...d, managerName: d.managerId ? name(s, d.managerId) : '', units: units(d).map(u => ({ ...u, userName: name(s, u.userId) })) })),
     usage: usageByDay(s, user),

@@ -201,6 +201,6 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(port, host, () => {
-  console.log('仪器台账  ' + origin);
+  console.log('常志勇课题组资产与耗材数字化管理平台  ' + origin);
   if (!before().users.length) console.log('首次初始化代码  ' + setupCode);
 });

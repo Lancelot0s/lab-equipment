@@ -33,8 +33,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .sidebar { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; background: var(--sidebar); color: #e9e6dc; padding: 28px 16px 18px; z-index: 4; }
 .brand { display: flex; align-items: center; gap: 12px; margin: 0 7px; min-width: 0; }
 .brand img { flex: none; }
-.brand span { display: grid; gap: 3px; }
-.brand strong { color: #fff8e9; font-size: 1.17rem; font-weight: 750; letter-spacing: .035em; line-height: 1.2; }
+.brand span { display: grid; gap: 4px; min-width: 0; }
+.brand strong { color: #fff8e9; font-size: .91rem; font-weight: 750; line-height: 1.35; overflow-wrap: anywhere; }
 .brand small { color: #aeaa9e; font-size: .73rem; white-space: nowrap; }
 .sidebar nav { margin-top: 43px; }
 .nav-group + .nav-group { margin-top: 29px; }
@@ -254,7 +254,7 @@ tr:last-child td { border-bottom: none; }
 .login-brand { position: relative; isolation: isolate; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; gap: 24px; background: #23221f; min-height: 100%; padding: clamp(25px, 5vw, 67px); color: #fff3d9; }
 .login-brand > div:not(.login-glyph) { display: grid; gap: 10px; padding-bottom: 12vh; }
 .login-brand span { font-size: .89rem; color: #f1cd83; letter-spacing: .09em; }
-.login-brand strong { font-size: clamp(2rem, 4vw, 3.8rem); letter-spacing: -.045em; }
+.login-brand strong { font-size: clamp(1.75rem, 3.15vw, 3.2rem); line-height: 1.22; overflow-wrap: anywhere; }
 .login-brand p { color: #d2cbbb; line-height: 1.55; font-size: .94rem; }
 .login-glyph { position: absolute; right: -95px; bottom: 22vh; transform: rotate(-14deg); z-index: -1; color: #ffffff0d; }
 .login-main { display: grid; place-items: center; padding: 24px; }
@@ -317,7 +317,7 @@ tr:last-child td { border-bottom: none; }
   .login-layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .login-brand { flex-direction: row; justify-content: flex-start; align-items: center; }
   .login-brand > div:not(.login-glyph) { padding: 0; gap: 4px; }
-  .login-brand strong { font-size: 1.55rem; }
+  .login-brand strong { font-size: 1.36rem; }
   .login-brand p { display: none; }
   .login-main { place-items: start center; }
   .login-card { padding: 20px; }

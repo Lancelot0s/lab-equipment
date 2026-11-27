@@ -1,8 +1,8 @@
-# 仪器台账
+# 常志勇课题组资产与耗材数字化管理平台
 
 实验室设备台账支持单件领用、审批、异常记录、搜索和三种用户权限。GitHub Pages 演示可直接访问，使用示例数据。点击设备名称可展开单件，右上角头像可切换演示角色。
 
-[打开仪器台账](https://lancelot0s.github.io/lab-equipment/)
+[打开管理平台](https://lancelot0s.github.io/lab-equipment/)
 
 ## 设备采购与取用
 

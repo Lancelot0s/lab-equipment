@@ -398,5 +398,5 @@ if __name__ == "__main__":
             context.minimum_version = ssl.TLSVersion.TLSv1_2
             context.load_cert_chain(certfile=cert, keyfile=key)
             server.socket = context.wrap_socket(server.socket, server_side=True)
-        print(f"仪器台账 {ORIGIN}", flush=True)
+        print(f"常志勇课题组资产与耗材数字化管理平台 {ORIGIN}", flush=True)
         server.serve_forever()
