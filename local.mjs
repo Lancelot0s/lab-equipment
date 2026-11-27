@@ -146,6 +146,15 @@ async function api(req, res) {
   const result = records(state => {
     const user = current(req, state);
     if (!user) fail('请重新登录', 401);
+    if (user.mustChangePassword) {
+      if (action !== 'password-change') fail('请先修改初始密码', 403);
+      if (verify(p.password, user.credential)) fail('请选择不同于初始密码的新密码');
+      user.credential = passwordHash(p.password);
+      delete user.mustChangePassword;
+      db.prepare('DELETE FROM sessions WHERE user_id = ?').run(user.id);
+      setSession(res, user);
+      return view(state, user);
+    }
     const parameters = { ...p, credential: undefined };
     if (action === 'account' && user.role === 'super') {
       if (!p.id || p.password) parameters.credential = passwordHash(p.password);

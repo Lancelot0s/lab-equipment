@@ -1,4 +1,4 @@
-import { roles, states, kinds, outcomes, canReview, mutate, view, deviceLabels, purchaseLabels, loanKinds, priceText, statDay } from './lab-core.mjs';
+import { roles, states, kinds, outcomes, canReview, canReviewRequest, mutate, view, deviceLabels, purchaseLabels, loanKinds, priceText, statDay } from './lab-core.mjs';
 import { sample } from './lab-demo.mjs';
 
 const glyphs = {
@@ -53,7 +53,7 @@ const pages = document.documentElement.dataset.hosting === 'github-pages';
 const demo = pages || new URLSearchParams(location.search).get('demo') === '1';
 const workspaceLink = document.querySelector('meta[name=lab-workspace-url]')?.content.trim() || '';
 const workspaceUrl = pages ? (/^https:\/\//i.test(workspaceLink) ? workspaceLink : '') : '/';
-const demoKey = 'lab-equipment-demo-v2';
+const demoKey = 'lab-equipment-demo-v3';
 const userKey = 'lab-equipment-demo-user-v1';
 let demoData;
 let data;
@@ -205,7 +205,7 @@ function navItem(key, symbol, count) {
 }
 function shell(content) {
   const user = data.user;
-  const pending = data.requests.filter(r => r.status === 'pending' && (r.authorId !== user.id || user.role === 'super')).length;
+  const pending = data.requests.filter(r => r.status === 'pending' && canReviewRequest(user, r)).length;
   const unread = data.notices.filter(n => !n.read).length;
   return '<div class="layout"><aside class="sidebar' + (mobileOpen ? ' mobile-open' : '') + '">'
     + '<a class="brand" href="#devices"><img src="./lab-mark.svg" width="42" height="42" alt=""><span><strong>仪器台账</strong><small>实验室设备管理</small></span></a>'
@@ -296,10 +296,7 @@ function groupedStatus(d) {
 function unitAction(d, u) {
   if (d.archived) return '';
   const attrs = keyed(d, u);
-  if (u.state === 'idle') {
-    return d.quickUse ? button('临时取用', null, 'quick-borrow', attrs, 'btn-flat')
-      : button('长期申请', null, 'borrow', attrs, 'btn-flat');
-  }
+  if (u.state === 'idle') return button('申请', null, 'borrow', attrs, 'btn-flat');
   if (u.state !== 'use' || u.userId !== data.user.id) return '';
   return u.loanMode === 'quick' ? button('直接归还', null, 'quick-return', attrs, 'btn-flat')
     : button('申请归还', null, 'return', attrs, 'btn-flat');
@@ -345,7 +342,7 @@ function devicesPage() {
   const locations = [...new Set(active.flatMap(d => [d.location, ...d.units.map(u => u.location).filter(Boolean)]))].sort((a, b) => a.localeCompare(b, 'zh'));
   const workspace = pages ? '<a class="btn" href="' + esc(workspaceUrl || './connection.html') + '">' + icon('switch', 16) + '正式台账</a>'
     + (workspaceUrl ? '<a class="btn btn-flat" href="./connection.html">首次访问</a>' : '') : '';
-  const actions = workspace + button('导出清单', 'download', 'export') + button(canReview(data.user) ? '新增设备' : '申请新增设备', 'plus', 'new-device', '', 'primary');
+  const actions = workspace + button('导出清单', 'download', 'export') + button('申请新增设备', 'plus', 'new-device', '', 'primary');
   const hasFilters = filters.q || filters.state || filters.project || filters.location;
   return titleBlock('设备台账', '查看设备存量、单件状态和当前使用情况。', actions) + summary()
     + '<section class="panel inventory" aria-label="设备清单"><div class="panel-heading"><div><h2>' + (inArchive ? '已归档设备' : '设备清单')
@@ -360,7 +357,7 @@ function devicesPage() {
       + visible.slice((viewPage - 1) * pageSize, viewPage * pageSize).map(deviceRow).join('') + '</tbody></table></div>'
       : emptyBlock('box', hasFilters ? '没有匹配的设备' : inArchive ? '暂无归档设备' : '台账还没有设备',
         hasFilters ? '可更换搜索词或清除筛选条件。' : inArchive ? '归档后的设备会出现在这里。' : '登记第一项设备后，即可开始追踪单件状态。',
-        hasFilters ? button('清除筛选', null, 'clear') : inArchive ? '' : button(canReview(data.user) ? '新增设备' : '申请新增设备', 'plus', 'new-device', '', 'primary')))
+        hasFilters ? button('清除筛选', null, 'clear') : inArchive ? '' : button('申请新增设备', 'plus', 'new-device', '', 'primary')))
     + pagination(visible.length, viewPage, 'device-page', '种设备') + '</section>';
 }
 function matches(query, values) {
@@ -385,7 +382,7 @@ function requestsPage(isApproval) {
     + rows.map(r => '<tr><td><strong>' + esc(r.target) + '</strong><small>' + esc(r.reason || r.payload.issue || '—') + '</small></td><td>' + kinds[r.kind] + '</td>'
     + (isApproval ? '<td>' + esc(r.author) + '</td>' : '') + '<td class="nowrap">' + prettyTime(r.time, true) + '</td>'
     + '<td>' + badge(r.status, outcomes[r.status]) + '</td><td>' + button(isApproval && r.status === 'pending'
-      && (r.authorId !== data.user.id || data.user.role === 'super') ? '审核' : '查看', null, 'request-detail', 'data-id="' + esc(r.id) + '"', 'btn-flat') + '</td></tr>').join('')
+      && canReviewRequest(data.user, r) ? '审核' : '查看', null, 'request-detail', 'data-id="' + esc(r.id) + '"', 'btn-flat') + '</td></tr>').join('')
     + '</tbody></table>';
   return titleBlock(isApproval ? '审批中心' : '我的申请', isApproval ? '查看和处理设备领用、归还、入库及修改申请。' : '查看提交记录与审核意见，可撤回待审核申请。',
     isApproval ? '' : button('前往设备台账', 'grid', 'to-devices')) + '<section class="panel"><div class="list-toolbar"><div class="tabs">'
@@ -558,9 +555,10 @@ function purchaseDetails(d, u) {
 function deviceForm(d) {
   dialogData = { d };
   const adding = !d;
-  const direct = adding ? canReview(data.user) : data.user.role === 'super';
-  const title = adding ? (direct ? '新增设备' : '申请新增设备') : direct ? '编辑设备' : '申请修改设备';
-  const managers = [['', '暂未指定'], ...(data.managers || []).map(manager => [manager.id, manager.name])];
+  const direct = !adding && data.user.role === 'super';
+  const title = adding ? '申请新增设备' : direct ? '编辑设备' : '申请修改设备';
+  const managers = [['', '暂未指定'], ...(data.managers || []).map(manager => [manager.id,
+    manager.name + (manager.username ? '（' + manager.username + '）' : '')])];
   if (d?.managerId && !managers.some(([id]) => id === d.managerId)) {
     managers.push([d.managerId, (d.managerName || '原管理员') + '（暂不可选用）']);
   }
@@ -570,25 +568,23 @@ function deviceForm(d) {
     + field('存放位置', 'location', d?.location, { max: 100, placeholder: '如 A区 · 试验台 01' })
     + field('所属项目', 'project', d?.project, { max: 100, placeholder: '填写所属项目' })
     + field('设备管理员', 'managerId', d?.managerId, { choices: managers, required: false })
-    + field('临时取用', 'quickUse', d?.quickUse ? 'yes' : 'no', { wide: true, choices: [['no', '长期使用需审批'], ['yes', '小件 · 临时取用免审批']] })
     + field('备注', 'note', d?.note, { area: true, wide: true, required: false })
     + '<section class="wide record-fields"><h3>采购信息</h3><div class="form-grid">'
     + procurementFields({ ...d, buyer: d?.buyer || data.user.name }) + '</div></section>'
     + (!direct ? field('申请说明', 'reason', '', { area: true, wide: true, max: 350, required: !adding }) : '')
     + '</div>' + (!adding ? '<p class="form-hint">增加数量会生成新的单件编号。减少数量会按编号由大到小移出空闲单件。</p>' : '');
-  modal(title, adding ? '登记后，系统会为每件实物生成独立编号。' : d.code + ' · ' + d.title, content,
+  modal(title, adding ? '审核通过后，设备入库并生成单件编号。' : d.code + ' · ' + d.title, content,
     cancelButton + confirmButton(direct ? '保存设备' : '提交申请'), 'device');
 }
 function deviceMenu(d) {
   const attrs = keyed(d);
   const items = button('采购详情', 'file', 'purchase', attrs) + (d.archived
-    ? button('恢复设备', 'archive', 'restore-device', attrs, 'primary')
+    ? button('删除设备', null, 'delete-device', attrs, 'warn') + button('恢复设备', 'archive', 'restore-device', attrs, 'primary')
     : button(data.user.role === 'super' ? '编辑设备' : '申请修改', 'pencil', 'edit-device', attrs)
       + (data.user.role === 'super' ? button('归档', 'archive', 'archive-device', attrs) : '')
-      + (d.units.some(u => u.state === 'idle')
-        ? (d.quickUse ? button('临时取用', 'plus', 'quick-borrow', attrs) : '') + button('长期使用申请', null, 'borrow', attrs, 'primary') : ''));
+      + (d.units.some(u => u.state === 'idle') ? button('申请', null, 'borrow', attrs, 'primary') : ''));
   modal(d.title, d.code, definition([['购买人', d.buyer], ['数量', String(d.units.length) + ' 件'], ['存放位置', d.location],
-    ['所属项目', d.project], ['设备管理员', d.managerName], ['临时取用', d.quickUse ? '免审批' : '长期使用需审批'], ['备注', d.note]])
+    ['所属项目', d.project], ['设备管理员', d.managerName], ['备注', d.note]])
     + '<div class="detail-badges">' + groupedStatus(d) + '</div>', items);
 }
 function unitMenu(d, u) {
@@ -596,8 +592,7 @@ function unitMenu(d, u) {
   const items = button('采购详情', 'file', 'purchase', attrs) + (d.archived ? '' :
     button(data.user.role === 'super' ? '编辑单件' : '申请修改单件', 'pencil', 'unit-edit', attrs)
     + button('申报异常', 'alert', 'fault', attrs)
-    + (u.state === 'idle' ? (d.quickUse ? button('临时取用', 'plus', 'quick-borrow', attrs) : '')
-      + button('长期使用申请', null, 'borrow', attrs, 'primary') : unitAction(d, u)));
+    + (u.state === 'idle' ? button('申请', null, 'borrow', attrs, 'primary') : unitAction(d, u)));
   modal(u.code, d.title, definition([['状态', states[u.state]], ['存放位置', u.location || d.location],
     ...(u.state === 'use' ? [['使用人', u.userName], ['使用方式', loanLabel(u)], ['开始时间', prettyTime(u.since, true)],
       ...(u.dueOn ? [['预计归还日期', u.dueOn]] : [])] : []),
@@ -655,21 +650,16 @@ function syncUnitForm() {
   }
 }
 
-function quickForm(action, d, u) {
-  const borrowing = action === 'quick-borrow';
-  const title = borrowing ? '临时取用' : '临时归还';
-  dialogData = { d, u, action };
-  const content = u ? definition([['单件编号', u.code], ['存放位置', u.location || d.location]])
-    : '<div class="form-grid">' + field('空闲单件', 'unitId', '', { wide: true,
-      choices: [['', '请选择空闲单件'], ...d.units.filter(unit => unit.state === 'idle')
-        .map(unit => [unit.id, unit.code + ' · ' + (unit.location || d.location)])] }) + '</div>';
-  modal(title, d.title, content, cancelButton + confirmButton(borrowing ? '登记取用' : '确认归还'), 'quick');
+function quickReturnForm(d, u) {
+  dialogData = { d, u };
+  modal('归还', d.title, definition([['单件编号', u.code], ['存放位置', u.location || d.location]]),
+    cancelButton + confirmButton('确认归还'), 'quick-return');
 }
 
 function requestDetail(r) {
   const d = findDevice(r.payload.deviceId);
   const isOwn = r.authorId === data.user.id;
-  const canAct = canReview(data.user) && (!isOwn || data.user.role === 'super');
+  const canAct = canReviewRequest(data.user, r);
   const pending = r.status === 'pending';
   let fields = [['申请人', r.author], ['提交时间', prettyTime(r.time, true)], ['审核状态', outcomes[r.status]]];
   if (d?.managerName && r.kind !== 'edit') fields.push(['设备管理员', d.managerName]);
@@ -680,7 +670,6 @@ function requestDetail(r) {
     const p = r.payload;
     const before = d ? { ...d, count: d.units.length } : null;
     const display = (key, value) => {
-      if (key === 'quickUse') return value ? '免审批' : '需审批';
       if (key === 'unitPriceCents') return priceText(value) || '—';
       if (key === 'managerId') return (data.managers || []).find(manager => manager.id === value)?.name
         || (value && value === d?.managerId ? d.managerName : '') || '—';
@@ -719,10 +708,23 @@ function confirmation(action, d, details, label) {
   dialogData = { d, action };
   modal(label, d.title, '<p class="confirm-detail">' + esc(details) + '</p>', cancelButton + confirmButton(label), 'confirm');
 }
+function deleteForm(d) {
+  dialogData = { d };
+  modal('删除归档设备', d.title + ' · ' + d.code, '<p class="confirm-detail">删除后无法恢复。历史操作和审批记录会保留。</p>'
+    + '<div class="form-grid review-field">' + field('输入设备编号确认', 'code', '', { wide: true, placeholder: d.code }) + '</div>',
+    cancelButton + '<button type="submit" class="btn warn">确认删除</button>', 'delete-device');
+}
 function signedOut() {
   const setup = auth?.setup;
-  const headline = loadError ? '暂时无法连接' : setup ? '初始化工作台' : '登录工作台';
-  let content = loadError ? '<p>' + esc(loadError) + '</p>' + button('重新连接', null, 'reload', '', 'primary')
+  const needsPassword = data?.passwordChangeRequired;
+  const headline = needsPassword ? '设置新密码' : loadError ? '暂时无法连接' : setup ? '初始化工作台' : '登录工作台';
+  const content = needsPassword ? '<p>首次登录，请为 ' + esc(data.user.username) + ' 设置新密码。</p>'
+    + '<form data-auth="password-change"><div class="form-grid">'
+    + field('新密码', 'password', '', { wide: true, type: 'password', autocomplete: 'new-password', placeholder: '至少 10 个字符' })
+    + field('确认新密码', 'confirmation', '', { wide: true, type: 'password', autocomplete: 'new-password' })
+    + '</div><p class="form-error" role="alert"></p>' + confirmButton('保存并进入台账') + ' '
+    + button('退出登录', 'logout', 'logout', '', 'btn-flat') + '</form>'
+    : loadError ? '<p>' + esc(loadError) + '</p>' + button('重新连接', null, 'reload', '', 'primary')
     : '<form data-auth="' + (setup ? 'setup' : 'login') + '"><div class="form-grid">'
       + (setup ? field('初始化代码', 'code', '', { wide: true, placeholder: '复制服务启动窗口中的代码' }) + field('姓名', 'name', '', { wide: true, max: 60 }) : '')
       + field('用户名', 'username', '', { wide: true, autocomplete: 'username' })
@@ -738,7 +740,7 @@ function render() {
   const search = active?.dataset?.search;
   const caret = search ? [active.selectionStart, active.selectionEnd] : null;
   root.removeAttribute('aria-busy');
-  if (!data) {
+  if (!data || data.passwordChangeRequired) {
     root.innerHTML = signedOut();
     return;
   }
@@ -833,11 +835,12 @@ document.addEventListener('click', event => {
     case 'device-menu': deviceMenu(d); break;
     case 'unit-menu': unitMenu(d, u); break;
     case 'purchase': purchaseDetails(d, u); break;
-    case 'quick-borrow': case 'quick-return': quickForm(action, d, u); break;
+    case 'quick-return': quickReturnForm(d, u); break;
     case 'borrow': case 'return': case 'fault': unitForm(action, d, u); break;
     case 'unit-edit': unitForm('unit', d, u); break;
     case 'archive-device': confirmation('archive', d, '归档后设备将移出当前清单，可在归档页恢复。', '归档设备'); break;
     case 'restore-device': confirmation('restore', d, '恢复后设备会重新出现在当前清单中。', '恢复设备'); break;
+    case 'delete-device': deleteForm(d); break;
     case 'archive-toggle': filters.archived = !filters.archived; clear(); render(); break;
     case 'request-detail': requestDetail(data.requests.find(r => r.id === key)); break;
     case 'request-cancel': {
@@ -889,13 +892,18 @@ document.addEventListener('submit', event => {
   if (!form.dataset.form && !form.dataset.auth) return;
   event.preventDefault();
   const p = Object.fromEntries(new FormData(form));
+  if (form.dataset.auth === 'password-change') {
+    if (p.password !== p.confirmation) {
+      form.querySelector('.form-error').textContent = '两次密码输入不一致';
+      return;
+    }
+    return write('password-change', { password: p.password }, '新密码已保存');
+  }
   if (form.dataset.auth) return write(form.dataset.auth, p, form.dataset.auth === 'setup' ? '已创建超级管理员' : '');
   const { d, u, r, kind, direct, action } = dialogData;
   if (form.dataset.form === 'device') {
-    p.quickUse = p.quickUse === 'yes';
     if (d) Object.assign(p, { deviceId: d.id, version: d.version });
-    const canWrite = d ? data.user.role === 'super' : canReview(data.user);
-    return canWrite ? write(d ? 'edit' : 'add', p, '设备台账已更新')
+    return d && data.user.role === 'super' ? write('edit', p, '设备台账已更新')
       : write('request', { kind: d ? 'edit' : 'add', payload: p }, '申请已提交，等待审核');
   }
   if (form.dataset.form === 'unit') {
@@ -903,8 +911,11 @@ document.addEventListener('submit', event => {
     return direct ? write('unit', p, '单件信息已保存')
       : write('request', { kind, payload: p }, '申请已提交，等待审核');
   }
-  if (form.dataset.form === 'quick') {
-    return write(action, { deviceId: d.id, unitId: p.unitId || u?.id }, action === 'quick-borrow' ? '已登记临时取用' : '已归还');
+  if (form.dataset.form === 'quick-return') {
+    return write('quick-return', { deviceId: d.id, unitId: u.id }, '已归还');
+  }
+  if (form.dataset.form === 'delete-device') {
+    return write('delete-device', { id: d.id, version: d.version, code: p.code.trim() }, '已删除归档设备');
   }
   if (form.dataset.form === 'review') {
     const result = event.submitter?.value;

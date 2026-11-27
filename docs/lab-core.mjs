@@ -5,7 +5,7 @@ export const outcomes = { pending: '待审核', approved: '已通过', rejected:
 export const purchaseLabels = { buyer: '购买人', purchasedOn: '购买日期', purchaseApprover: '购买审批人',
   fundingProject: '采购经费项目', unitPriceCents: '单价（元）' };
 export const deviceLabels = { title: '设备名称', count: '数量', location: '存放位置', project: '所属项目',
-  managerId: '设备管理员', quickUse: '临时取用', note: '备注', ...purchaseLabels };
+  managerId: '设备管理员', note: '备注', ...purchaseLabels };
 export const loanKinds = { quick: '临时取用', long: '长期使用', manual: '管理员登记' };
 export const priceText = cents => Number.isSafeInteger(cents) && cents >= 0
   ? Math.floor(cents / 100) + '.' + String(cents % 100).padStart(2, '0') : '';
@@ -68,7 +68,7 @@ function procurement(p, defaults = {}) {
 function checkManager(s, managerId, previous) {
   if (!managerId || managerId === previous) return;
   const manager = person(s, managerId);
-  if (!manager || manager.disabled || !canReview(manager)) fail('请选择已启用的管理员作为设备管理员', 409);
+  if (!manager || manager.disabled) fail('请选择已启用的账号作为设备管理员', 409);
 }
 
 function details(s, p, d = {}) {
@@ -76,11 +76,10 @@ function details(s, p, d = {}) {
   if (!Number.isInteger(count) || count < 1 || count > 200) fail('数量须为 1 至 200 的整数');
   const managerId = field(p.managerId ?? d.managerId, '设备管理员', 80, false);
   checkManager(s, managerId, d.managerId);
-  if (own(p, 'quickUse') && typeof p.quickUse !== 'boolean') fail('请选择临时取用规则');
   return {
     title: field(p.title, '设备名称', 100), ...procurement(p, d),
     count, location: field(p.location, '存放位置', 100), project: field(p.project, '所属项目', 100),
-    note: field(p.note, '备注', 600, false), managerId, quickUse: p.quickUse ?? Boolean(d.quickUse),
+    note: field(p.note, '备注', 600, false), managerId,
   };
 }
 
@@ -140,6 +139,10 @@ function targetOf(d, u) {
   return d ? d.title + (u ? ' / ' + u.code : '') : '';
 }
 
+export function canReviewRequest(user, request) {
+  return canReview(user) && (request.authorId !== user.id || (user.role === 'super' && request.kind !== 'add'));
+}
+
 function unitDetailChanges(d, unit, changes) {
   const labels = { location: '位置', note: '备注' };
   const detail = Object.keys(labels).filter(key => (unit[key] || '') !== changes[key])
@@ -173,7 +176,6 @@ function apply(s, user, kind, payload) {
     const before = { ...d, count: units(d).length };
     changeDevice(d, p);
     const display = (key, value) => {
-      if (key === 'quickUse') return value ? '免审批' : '需审批';
       if (key === 'managerId') return name(s, value) || '—';
       if (key === 'unitPriceCents') return priceText(value) || '—';
       return value || '—';
@@ -183,11 +185,10 @@ function apply(s, user, kind, payload) {
   }
   const unit = getUnit(d, p.unitId);
   const prior = states[unit.state] + (unit.userId ? ' · ' + name(s, unit.userId) : '') + (unit.issue ? ' · ' + unit.issue : '');
-  if (kind === 'borrow' || kind === 'quick-borrow') {
-    if (kind === 'quick-borrow' && !d.quickUse) fail('此设备需提交长期使用申请', 403);
+  if (kind === 'borrow') {
     if (unit.state !== 'idle') fail('这件设备已不可领用，请选择其他空闲单件', 409);
     Object.assign(unit, { state: 'use', userId: user.id, issue: '', since: now(),
-      loanMode: kind === 'quick-borrow' ? 'quick' : 'long', dueOn: kind === 'borrow' ? p.dueOn || '' : '' });
+      loanMode: 'long', dueOn: p.dueOn || '' });
   } else if (kind === 'return' || kind === 'quick-return') {
     if (unit.state !== 'use' || unit.userId !== user.id) fail('该设备已不在你的领用名下', 409);
     if (kind === 'quick-return' && unit.loanMode !== 'quick') fail('长期领用请提交归还申请', 403);
@@ -240,21 +241,24 @@ function submit(s, user, kind, input) {
   const req = { ...stamp(), kind, payload, reason, target, authorId: user.id, author: user.name, status: 'pending' };
   s.requests.unshift(req);
   audit(s, user, '提交' + kinds[kind], target, payload.issue || reason);
-  const reviewers = s.users.filter(u => !u.disabled && canReview(u) && (u.id !== user.id || u.role === 'super'));
+  const reviewers = s.users.filter(u => !u.disabled && canReviewRequest(u, req));
   const assigned = d ? d.managerId : payload.managerId;
+  const manager = assigned && person(s, assigned);
   const recipients = reviewers.some(u => u.id === assigned)
     ? reviewers.filter(u => u.id === assigned || u.role === 'super') : reviewers;
   for (const reviewer of recipients) {
     notice(s, reviewer.id, '待审核 · ' + kinds[kind], user.name + ' · ' + target, req.id);
   }
+  if (manager && !manager.disabled && manager.id !== user.id && !recipients.some(u => u.id === manager.id)) {
+    notice(s, manager.id, '设备申请 · ' + kinds[kind], user.name + ' · ' + target, req.id);
+  }
 }
 
 export function mutate(s, user, action, body = {}) {
   const p = body || {};
-  if (action === 'quick-borrow' || action === 'quick-return') {
+  if (action === 'quick-return') {
     const result = apply(s, user, action, p);
-    const usage = action === 'quick-borrow' ? { deviceId: p.deviceId, userId: user.id, mode: 'quick' } : undefined;
-    audit(s, user, action === 'quick-borrow' ? '登记临时取用' : '登记临时归还', result.target, result.detail, usage);
+    audit(s, user, '登记临时归还', result.target, result.detail);
     return;
   }
   if (action === 'request') {
@@ -271,7 +275,7 @@ export function mutate(s, user, action, body = {}) {
       audit(s, user, '撤回' + kinds[r.kind], r.target);
       return;
     }
-    if (!canReview(user) || (r.authorId === user.id && user.role !== 'super')) fail('没有审核这条申请的权限', 403);
+    if (!canReviewRequest(user, r)) fail('没有审核这条申请的权限', 403);
     if (!['approved', 'rejected'].includes(p.result)) fail('请选择审核结果');
     const comment = field(p.comment, '审核意见', 350, p.result === 'rejected');
     let applied;
@@ -287,11 +291,6 @@ export function mutate(s, user, action, body = {}) {
   }
   if (action === 'notice') {
     for (const n of s.notices) if (n.recipient === user.id && (p.all === true || n.id === p.id)) n.read = true;
-    return;
-  }
-  if (action === 'add' && canReview(user)) {
-    const result = apply(s, user, 'add', details(s, p));
-    audit(s, user, '登记设备', result.target, result.detail);
     return;
   }
   if (user.role !== 'super') fail('没有执行此操作的权限', 403);
@@ -338,6 +337,21 @@ export function mutate(s, user, action, body = {}) {
     audit(s, user, '恢复设备', d.title, '恢复 ' + units(d).length + ' 件设备');
     return;
   }
+  if (action === 'delete-device') {
+    const index = s.devices.findIndex(item => item.id === p.id && item.archived);
+    if (index < 0) fail('只能删除已归档的设备', 409);
+    const d = s.devices[index];
+    if (d.version !== p.version) fail('设备信息已更新，请刷新后重试', 409);
+    if (p.code !== d.code) fail('请输入正确的设备编号确认删除');
+    for (const r of s.requests.filter(r => r.status === 'pending' && r.payload.deviceId === d.id)) {
+      const comment = '关联设备已删除';
+      Object.assign(r, { status: 'cancelled', comment, reviewer: user.name, closed: now() });
+      notice(s, r.authorId, '申请已关闭', r.target + ' · ' + comment, r.id);
+    }
+    s.devices.splice(index, 1);
+    audit(s, user, '删除归档设备', targetOf(d), d.code + ' · ' + units(d).length + ' 件');
+    return;
+  }
   if (action === 'account') {
     const displayName = field(p.name, '姓名', 60);
     if (!own(roles, p.role)) fail('请选择有效的用户角色');
@@ -357,7 +371,10 @@ export function mutate(s, user, action, body = {}) {
     if (account?.id === user.id && (disabled || p.role !== 'super')) fail('请由其他超级管理员调整你的账号', 409);
     if (account?.owner && (disabled || p.role !== 'super')) fail('系统所有者须保留超级管理员权限', 409);
     const values = { name: displayName, role: p.role, disabled };
-    if (p.credential) values.credential = p.credential;
+    if (p.credential) {
+      values.credential = p.credential;
+      values.mustChangePassword = Boolean(account?.mustChangePassword);
+    }
     if (account) {
       Object.assign(account, values);
     } else {
@@ -401,13 +418,18 @@ function usageByDay(s, user) {
 export function view(s, user) {
   if (user.disabled) fail('该账号已停用', 403);
   const staff = canReview(user);
+  const identity = { id: user.id, name: user.name, role: user.role, username: user.username || user.email };
+  if (user.mustChangePassword) return { user: identity, passwordChangeRequired: true };
+  const managed = new Set(s.devices.filter(d => d.managerId === user.id).map(d => d.id));
+  const assignedNotices = new Set(s.notices.filter(n => n.recipient === user.id).map(n => n.requestId));
   return {
-    user: { id: user.id, name: user.name, role: user.role, username: user.username || user.email },
-    managers: s.users.filter(u => !u.disabled && canReview(u)).map(({ id, name }) => ({ id, name })),
+    user: identity,
+    managers: s.users.filter(u => !u.disabled).map(({ id, name, username, email }) => ({ id, name, username: username || email })),
     devices: s.devices.filter(d => !d.archived || user.role === 'super')
       .map(d => ({ ...d, managerName: d.managerId ? name(s, d.managerId) : '', units: units(d).map(u => ({ ...u, userName: name(s, u.userId) })) })),
     usage: usageByDay(s, user),
-    requests: s.requests.filter(r => staff || r.authorId === user.id),
+    requests: s.requests.filter(r => staff || r.authorId === user.id
+      || (assignedNotices.has(r.id) && (managed.has(r.payload.deviceId) || (r.kind === 'add' && r.payload.managerId === user.id)))),
     history: s.history.filter(h => staff || h.actorId === user.id).map(({ usage, ...entry }) => entry),
     notices: s.notices.filter(n => n.recipient === user.id).map(n => ({
       ...n, pending: s.requests.some(r => r.id === n.requestId && r.status === 'pending'),

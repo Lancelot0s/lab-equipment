@@ -1,4 +1,4 @@
-import { empty, mutate } from './lab-core.mjs';
+import { empty, mutate, kinds } from './lab-core.mjs';
 
 export function sample() {
   const s = empty();
@@ -21,16 +21,17 @@ export function sample() {
     ['便携式数据采集仪', '何明', 3, 'C区 · 仪器柜 01', '材料表征', '配套信号线存放在仪器柜'],
   ];
   for (const [index, [title, buyer, count, location, project, note]] of assets.entries()) {
-    mutate(s, admin, 'add', { title, buyer, count, location, project, note,
+    mutate(s, admin, 'request', { kind: 'add', payload: { title, buyer, count, location, project, note,
       purchasedOn: '2026-09-' + String(10 + index), purchaseApprover: superuser.name,
       fundingProject: index === 0 ? '实验室仪器平台建设' : project,
-      managerId: admin.id, quickUse: index === 5, unitPrice: [2900, 6900, 16200, 3750, 1300, 280, 5200, 4880][index] });
+      managerId: admin.id, unitPrice: [2900, 6900, 16200, 3750, 1300, 280, 5200, 4880][index] } });
+    mutate(s, superuser, 'review', { id: s.requests[0].id, result: 'approved' });
   }
   s.devices.reverse();
   const offset = (days, hours = 0) => new Date(Date.now() - (days * 24 + hours) * 3_600_000).toISOString();
   const historicalUse = (d, unit, holder, time) => {
     const target = d.title + ' / ' + unit.code;
-    if (d.quickUse) {
+    if (d === s.devices[5]) {
       s.history.unshift({ id: crypto.randomUUID(), time, actor: holder.name, actorId: holder.id, action: '登记临时取用', target,
         detail: '空闲 → 使用中 · ' + holder.name, usage: { deviceId: d.id, userId: holder.id, mode: 'quick' } });
       return;
@@ -57,7 +58,9 @@ export function sample() {
     purchaseApprover: superuser.name, fundingProject: '材料测试补充经费', unitPriceCents: 298_050 };
   Object.assign(s.devices[4].units[0], { state: 'fault', issue: '运行时出现异常振动，待检查泵体。' });
   Object.assign(s.devices[6].units[0], { state: 'fault', issue: '目镜调焦卡滞，待维护。' });
-  for (const h of s.history.filter(entry => entry.action === '登记设备')) h.time = offset(60);
+  for (const request of s.requests.filter(entry => entry.kind === 'add')) request.time = request.closed = offset(60);
+  for (const entry of s.history.filter(h => h.action.endsWith(kinds.add))) entry.time = offset(60);
+  s.notices = [];
   s.history.sort((a, b) => b.time.localeCompare(a.time));
   s.requests.sort((a, b) => b.time.localeCompare(a.time));
   mutate(s, wu, 'request', { kind: 'add', payload: { title: '移液器', buyer: wu.name, count: 2, location: 'B区 · 样品制备室', project: '溶液制备', note: '10–100 μL', reason: '新购入实验室耗材与仪器' } });

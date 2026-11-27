@@ -327,15 +327,27 @@ class LabHandler(BaseHTTPRequestHandler):
                 user = self.current_user(db, state, token)
                 if not user:
                     raise LabError("请重新登录", 401)
-                fields = dict(p)
-                fields.pop("credential", None)
-                password = fields.pop("password", None)
-                if action == "account" and user["role"] == "super" and (not p.get("id") or password):
-                    fields["credential"] = make_password(password)
-                new_state, result = run_core(state, user_id=user["id"], action=action, fields=fields)
-                write_state(db, new_state)
-                if action == "account" and p.get("id") and (p.get("disabled") or fields.get("credential")):
-                    db.execute("DELETE FROM sessions WHERE user_id = ?", (p["id"],))
+                if user.get("mustChangePassword"):
+                    if action != "password-change":
+                        raise LabError("请先修改初始密码", 403)
+                    if verify_password(p.get("password"), user.get("credential")):
+                        raise LabError("请选择不同于初始密码的新密码")
+                    user["credential"] = make_password(p.get("password"))
+                    user.pop("mustChangePassword")
+                    write_state(db, state)
+                    db.execute("DELETE FROM sessions WHERE user_id = ?", (user["id"],))
+                    _, result = run_core(state, user_id=user["id"])
+                    cookie = self.new_session(db, user)
+                else:
+                    fields = dict(p)
+                    fields.pop("credential", None)
+                    password = fields.pop("password", None)
+                    if action == "account" and user["role"] == "super" and (not p.get("id") or password):
+                        fields["credential"] = make_password(password)
+                    new_state, result = run_core(state, user_id=user["id"], action=action, fields=fields)
+                    write_state(db, new_state)
+                    if action == "account" and p.get("id") and (p.get("disabled") or fields.get("credential")):
+                        db.execute("DELETE FROM sessions WHERE user_id = ?", (p["id"],))
             db.execute("COMMIT")
             if action == "setup":
                 SETUP.unlink(missing_ok=True)
