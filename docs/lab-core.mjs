@@ -65,10 +65,11 @@ function procurement(p, defaults = {}) {
   };
 }
 
+const canAssignDevice = user => Boolean(user && !user.disabled && !user.hideFromDeviceManagers);
+
 function checkManager(s, managerId, previous) {
   if (!managerId || managerId === previous) return;
-  const manager = person(s, managerId);
-  if (!manager || manager.disabled) fail('请选择已启用的账号作为设备管理员', 409);
+  if (!canAssignDevice(person(s, managerId))) fail('请选择候选名单中的设备管理员', 409);
 }
 
 function details(s, p, d = {}) {
@@ -424,7 +425,7 @@ export function view(s, user) {
   const assignedNotices = new Set(s.notices.filter(n => n.recipient === user.id).map(n => n.requestId));
   return {
     user: identity,
-    managers: s.users.filter(u => !u.disabled).map(({ id, name, username, email }) => ({ id, name, username: username || email })),
+    managers: s.users.filter(canAssignDevice).map(({ id, name, username, email, role }) => ({ id, name, username: username || email, role })),
     devices: s.devices.filter(d => !d.archived || user.role === 'super')
       .map(d => ({ ...d, managerName: d.managerId ? name(s, d.managerId) : '', units: units(d).map(u => ({ ...u, userName: name(s, u.userId) })) })),
     usage: usageByDay(s, user),

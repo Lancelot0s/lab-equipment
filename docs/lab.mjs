@@ -557,10 +557,13 @@ function deviceForm(d) {
   const adding = !d;
   const direct = !adding && data.user.role === 'super';
   const title = adding ? '申请新增设备' : direct ? '编辑设备' : '申请修改设备';
-  const managers = [['', '暂未指定'], ...(data.managers || []).map(manager => [manager.id,
+  const byName = new Intl.Collator('zh-CN-u-co-pinyin');
+  const candidates = [...(data.managers || [])].sort((a, b) => Number(canReview(b)) - Number(canReview(a))
+    || byName.compare(a.name, b.name) || byName.compare(a.username, b.username));
+  const managers = [['', '暂未指定'], ...candidates.map(manager => [manager.id,
     manager.name + (manager.username ? '（' + manager.username + '）' : '')])];
   if (d?.managerId && !managers.some(([id]) => id === d.managerId)) {
-    managers.push([d.managerId, (d.managerName || '原管理员') + '（暂不可选用）']);
+    managers.push([d.managerId, '保留当前负责人']);
   }
   const content = '<div class="form-grid">'
     + field('设备名称', 'title', d?.title, { max: 100, wide: true, placeholder: '填写型号或常用名称' })
