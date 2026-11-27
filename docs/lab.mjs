@@ -1,4 +1,4 @@
-import { roles, states, kinds, outcomes, canReview, mutate, view, deviceLabels, purchaseLabels } from './lab-core.mjs';
+import { roles, states, kinds, outcomes, canReview, mutate, view, deviceLabels, purchaseLabels, loanKinds, priceText, statDay } from './lab-core.mjs';
 import { sample } from './lab-demo.mjs';
 
 const glyphs = {
@@ -17,6 +17,7 @@ const glyphs = {
   box: '<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9M8 5.3l8 4.5"/>',
   check: '<circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16 9"/>',
   activity: '<path d="M3 12h4l3-7 4 14 3-7h4"/>',
+  chart: '<path d="M4 4v16h16M8 16v-4m4 4V8m4 8V5"/>',
   alert: '<path d="M10.4 4.8 3.3 17a2 2 0 0 0 1.7 3h14a2 2 0 0 0 1.7-3L13.6 4.8a1.8 1.8 0 0 0-3.2 0Z"/><path d="M12 9v4m0 3h.01"/>',
   search: '<circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 4 4"/>',
   more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
@@ -52,7 +53,7 @@ const pages = document.documentElement.dataset.hosting === 'github-pages';
 const demo = pages || new URLSearchParams(location.search).get('demo') === '1';
 const workspaceLink = document.querySelector('meta[name=lab-workspace-url]')?.content.trim() || '';
 const workspaceUrl = pages ? (/^https:\/\//i.test(workspaceLink) ? workspaceLink : '') : '/';
-const demoKey = 'lab-equipment-demo-v1';
+const demoKey = 'lab-equipment-demo-v2';
 const userKey = 'lab-equipment-demo-user-v1';
 let demoData;
 let data;
@@ -69,8 +70,9 @@ let secondaryPage = 1;
 const expanded = new Set();
 const filters = { q: '', state: '', project: '', location: '', archived: false };
 const listFilter = { q: '', status: 'all' };
+const usageFilters = { period: '30', project: '', scope: 'all' };
 const pageSize = 8;
-const titles = { devices: '设备台账', mine: '我的申请', approvals: '审批中心', history: '历史记录', accounts: '账号管理', notices: '站内通知' };
+const titles = { devices: '设备台账', mine: '我的申请', approvals: '审批中心', usage: '使用统计', history: '历史记录', accounts: '账号管理', notices: '站内通知' };
 const rowTime = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 const fullTime = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 const dateLabel = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: 'long', day: 'numeric', weekday: 'long' });
@@ -208,7 +210,7 @@ function shell(content) {
   return '<div class="layout"><aside class="sidebar' + (mobileOpen ? ' mobile-open' : '') + '">'
     + '<a class="brand" href="#devices"><img src="./lab-mark.svg" width="42" height="42" alt=""><span><strong>仪器台账</strong><small>实验室设备管理</small></span></a>'
     + '<nav aria-label="主导航"><div class="nav-group"><div class="nav-label">工作台</div>'
-    + navItem('devices', 'grid') + navItem('mine', 'file') + (canReview(user) ? navItem('approvals', 'checkList', pending) : '')
+    + navItem('devices', 'grid') + navItem('mine', 'file') + (canReview(user) ? navItem('approvals', 'checkList', pending) : '') + navItem('usage', 'chart')
     + '</div><div class="nav-group"><div class="nav-label">管理</div>' + navItem('history', 'history')
     + (user.role === 'super' ? navItem('accounts', 'users') : '') + '</div></nav>'
     + '<div class="sidebar-bottom"><span class="workspace-icon">' + icon('box', 17) + '</span><span><strong>' + (demo ? '演示工作台' : '实验室工作台') + '</strong>'
@@ -391,6 +393,87 @@ function requestsPage(isApproval) {
     + searchBox('list', listFilter.q, '搜索设备、申请类型…') + '</div>'
     + genericRows(records, table, 'checkList', '暂无相关申请') + '</section>';
 }
+const dayMillis = 24 * 3_600_000;
+const periodOptions = [['7', '近 7 天'], ['30', '近 30 天'], ['90', '近 90 天'], ['all', '全部时间']];
+
+function usageSelect(key, label, choices) {
+  return '<label class="usage-select"><span>' + label + '</span><span class="select-wrap">'
+    + '<select data-usage-filter="' + key + '">' + options(choices, usageFilters[key]) + '</select>'
+    + icon('chevron', 15) + '</span></label>';
+}
+
+function usageSummary() {
+  const active = data.devices.filter(d => !d.archived);
+  const projects = [...new Set(active.map(d => d.project))].sort((a, b) => a.localeCompare(b, 'zh'));
+  if (!projects.includes(usageFilters.project)) usageFilters.project = '';
+  const current = Date.now();
+  const until = statDay(current);
+  const from = usageFilters.period === 'all' ? '' : statDay(current - (Number(usageFilters.period) - 1) * dayMillis);
+  const mine = usageFilters.scope === 'mine';
+  const rows = active.filter(d => !usageFilters.project || d.project === usageFilters.project).map(d => ({
+    device: d, total: 0, quick: 0, long: 0, manual: 0, last: '',
+    inUse: d.units.filter(u => u.state === 'use' && (!mine || u.userId === data.user.id)).length,
+    faults: d.units.filter(u => u.state === 'fault').length,
+  }));
+  const lookup = new Map(rows.map(row => [row.device.id, row]));
+  const days = new Map(Array.from({ length: 7 }, (_, i) => [statDay(current - (6 - i) * dayMillis), 0]));
+  const total = { all: 0, quick: 0, long: 0, manual: 0 };
+  for (const record of data.usage || []) {
+    const row = lookup.get(record.deviceId);
+    const amount = mine ? record.mine : record.count;
+    if (!row || !amount || record.day < from || record.day > until || !Object.hasOwn(loanKinds, record.mode)) continue;
+    row.total += amount;
+    row[record.mode] += amount;
+    if (record.day > row.last) row.last = record.day;
+    if (days.has(record.day)) days.set(record.day, days.get(record.day) + amount);
+    total.all += amount;
+    total[record.mode] += amount;
+  }
+  rows.sort((a, b) => b.total - a.total || b.last.localeCompare(a.last) || a.device.title.localeCompare(b.device.title, 'zh'));
+  return { projects, rows, days, total, mine, from, until };
+}
+
+function usageMeter(value, largest) {
+  return '<meter class="usage-meter" value="' + value + '" max="' + Math.max(1, largest) + '" aria-hidden="true"></meter>';
+}
+
+function usagePage() {
+  const { projects, rows, days, total, mine, from, until } = usageSummary();
+  const used = rows.filter(row => row.total > 0).length;
+  const currentCount = rows.reduce((sum, row) => sum + row.inUse, 0);
+  const faults = rows.reduce((sum, row) => sum + row.faults, 0);
+  const metrics = [
+    ['使用次数', total.all, '次', 'chart', 'total', '临时 ' + total.quick + ' · 长期 ' + total.long + ' · 登记 ' + total.manual],
+    ['有使用记录', used, '种', 'check', 'idle', '统计期间 · 共 ' + rows.length + ' 种设备'],
+    ['无使用记录', rows.length - used, '种', 'box', 'fault', '统计期间'],
+    [mine ? '我当前在用' : '当前在用', currentCount, '件', 'activity', 'use', mine ? '实时状态' : '实时状态 · 异常 ' + faults + ' 件'],
+  ];
+  const overview = '<div class="metrics usage-overview">' + metrics.map(([label, value, unit, symbol, color, hint]) =>
+    '<div class="metric usage-card"><div class="metric-top"><span class="metric-icon ' + color + '">' + icon(symbol, 20)
+    + '</span>' + label + '</div><div class="metric-number">' + value + '<span> ' + unit + '</span></div>'
+    + '<p class="metric-hint">' + hint + '</p></div>').join('') + '</div>';
+  const controls = '<div class="usage-filters">'
+    + usageSelect('period', '统计时间', periodOptions)
+    + usageSelect('project', '所属项目', [['', '全部项目'], ...projects.map(p => [p, p])])
+    + usageSelect('scope', '使用范围', [['all', '全部成员'], ['mine', '我的使用']])
+    + (from ? '<span class="usage-dates">' + from + ' 至 ' + until + '</span>' : '') + '</div>';
+  const dailyPeak = Math.max(1, ...days.values());
+  const trend = '<section class="panel usage-panel"><div class="panel-heading"><h2>近 7 天每日使用</h2></div><div class="usage-series">'
+    + [...days].map(([day, count]) => '<div class="usage-series-row"><time datetime="' + day + '">' + day.slice(5).replace('-', '/')
+      + '</time>' + usageMeter(count, dailyPeak) + '<strong>' + count + ' 次</strong></div>').join('') + '</div></section>';
+  const peak = rows[0]?.total || 1;
+  const ranking = '<section class="panel usage-ranking"><div class="panel-heading"><h2>设备使用排行</h2></div>'
+    + genericRows(rows, slice => '<table class="standard-table usage-table"><thead><tr><th>设备 / 所属项目</th><th>使用次数</th>'
+      + '<th>临时取用</th><th>长期使用</th><th>管理员登记</th><th>最近使用</th></tr></thead><tbody>'
+      + slice.map(({ device, total: count, quick, long, manual, last }) => '<tr><td><button class="purchase-link" type="button" data-action="device-menu" '
+        + keyed(device) + '>' + esc(device.title) + '</button><small>' + esc(device.project) + '</small></td>'
+        + '<td class="usage-total"><strong>' + count + ' 次</strong>' + usageMeter(count, peak) + '</td><td>' + quick + '</td><td>'
+        + long + '</td><td>' + manual + '</td><td class="nowrap">' + (last || '—') + '</td></tr>').join('') + '</tbody></table>',
+    'chart', '当前台账暂无设备') + '</section>';
+  return titleBlock('使用统计', '汇总当前台账设备的临时取用、已批准长期使用和管理员登记。')
+    + controls + overview + '<div class="usage-panels">' + ranking + trend + '</div>';
+}
+
 function historyPage() {
   const query = listFilter.q.trim().toLowerCase();
   const records = data.history.filter(h => matches(query, [h.actor, h.action, h.target, h.detail]));
@@ -435,7 +518,8 @@ function field(label, name, value = '', config = {}) {
     : config.area ? '<textarea name="' + name + '" rows="3" maxlength="' + (config.max || 600) + '"' + required + placeholder + '>' + esc(value) + '</textarea>'
     : '<input name="' + name + '" type="' + (config.type || 'text') + '" value="' + esc(value) + '"' + required + placeholder
       + (config.type === 'number' ? ' min="1" max="200"' : ' maxlength="' + (config.max || 160) + '"')
-      + (config.autocomplete ? ' autocomplete="' + config.autocomplete + '"' : '') + (config.readonly ? ' readonly' : '') + '>';
+      + (config.autocomplete ? ' autocomplete="' + config.autocomplete + '"' : '')
+      + (config.inputMode ? ' inputmode="' + config.inputMode + '"' : '') + (config.readonly ? ' readonly' : '') + '>';
   return '<label class="form-field ' + (config.wide ? 'wide' : '') + '"><span>' + label + (config.required === false ? ' <small>选填</small>' : '') + '</span>' + control + '</label>';
 }
 function definition(rows) {
@@ -456,10 +540,11 @@ function procurementFields(p = {}) {
   return field(purchaseLabels.buyer, 'buyer', p.buyer, { max: 60 })
     + field(purchaseLabels.purchasedOn, 'purchasedOn', p.purchasedOn, { type: 'date', required: false })
     + field(purchaseLabels.purchaseApprover, 'purchaseApprover', p.purchaseApprover, { max: 60, required: false })
-    + field(purchaseLabels.fundingProject, 'fundingProject', p.fundingProject, { max: 100, required: false });
+    + field(purchaseLabels.fundingProject, 'fundingProject', p.fundingProject, { max: 100, required: false })
+    + field(purchaseLabels.unitPriceCents, 'unitPrice', priceText(p.unitPriceCents), { max: 21, required: false, inputMode: 'decimal', placeholder: '例如 125.50' });
 }
 function procurementRows(p) {
-  return Object.entries(purchaseLabels).map(([key, label]) => [label, p[key]]);
+  return Object.entries(purchaseLabels).map(([key, label]) => [label, key === 'unitPriceCents' ? priceText(p[key]) : p[key]]);
 }
 function purchaseDetails(d, u) {
   const overrides = u ? [] : d.units.filter(unit => unit.purchase);
@@ -594,8 +679,13 @@ function requestDetail(r) {
   if (r.kind === 'add' || r.kind === 'edit') {
     const p = r.payload;
     const before = d ? { ...d, count: d.units.length } : null;
-    const display = (key, value) => key === 'quickUse' ? value ? '免审批' : '需审批' : key === 'managerId'
-      ? (data.managers || []).find(manager => manager.id === value)?.name || (value && value === d?.managerId ? d.managerName : '') || '—' : value || '—';
+    const display = (key, value) => {
+      if (key === 'quickUse') return value ? '免审批' : '需审批';
+      if (key === 'unitPriceCents') return priceText(value) || '—';
+      if (key === 'managerId') return (data.managers || []).find(manager => manager.id === value)?.name
+        || (value && value === d?.managerId ? d.managerName : '') || '—';
+      return value || '—';
+    };
     const formFields = Object.entries(deviceLabels).filter(([key]) => Object.hasOwn(p, key)
       && (r.kind === 'add' || !pending || !before || display(key, before[key]) !== display(key, p[key])));
     fields = fields.concat(formFields.map(([key, label]) => [label,
@@ -652,7 +742,8 @@ function render() {
     root.innerHTML = signedOut();
     return;
   }
-  const pages = { devices: devicesPage, mine: () => requestsPage(false), approvals: () => requestsPage(true), history: historyPage, accounts: accountsPage, notices: noticesPage };
+  const pages = { devices: devicesPage, mine: () => requestsPage(false), approvals: () => requestsPage(true), usage: usagePage,
+    history: historyPage, accounts: accountsPage, notices: noticesPage };
   root.innerHTML = shell(pages[page()]());
   if (search) {
     const next = root.querySelector('[data-search="' + search + '"]');
@@ -668,7 +759,7 @@ function exportCsv() {
     return '"' + (/^[\s]*[=+\-@\t\r]/.test(plain) ? "'" + plain : plain).replaceAll('"', '""') + '"';
   };
   const rows = [['设备名称', '设备组编号', '组内数量', '单件编号', '购买人', '状态', '使用人', '异常情况', '存放位置', '所属项目',
-    '设备备注', '单件备注', '购买日期', '购买审批人', '采购经费项目', '设备管理员', '使用方式', '预计归还日期']];
+    '设备备注', '单件备注', '购买日期', '购买审批人', '采购经费项目', '设备管理员', '使用方式', '预计归还日期', '单价（元）']];
   for (const d of records) {
     for (const u of d.units) {
       if (filters.state && u.state !== filters.state) continue;
@@ -676,7 +767,7 @@ function exportCsv() {
       const p = u.purchase || d;
       rows.push([d.title, d.code, d.units.length, u.code, p.buyer, states[u.state], u.userName, u.issue, u.location || d.location,
         d.project, d.note, u.note, p.purchasedOn, p.purchaseApprover, p.fundingProject, d.managerName,
-        u.state === 'use' ? loanLabel(u) : '', u.dueOn]);
+        u.state === 'use' ? loanLabel(u) : '', u.dueOn, priceText(p.unitPriceCents)]);
     }
   }
   if (rows.length === 1) return toast('当前筛选条件下没有可导出的单件', true);
@@ -780,6 +871,12 @@ document.addEventListener('compositionend', event => {
 });
 document.addEventListener('change', event => {
   const element = event.target;
+  const usageKey = element.dataset.usageFilter;
+  if (usageKey && Object.hasOwn(usageFilters, usageKey)) {
+    usageFilters[usageKey] = element.value;
+    secondaryPage = 1;
+    render();
+  }
   if (element.dataset.filter) {
     filters[element.dataset.filter] = element.value;
     viewPage = 1;

@@ -2,9 +2,17 @@ export const roles = { member: '普通用户', admin: '管理员', super: '超�
 export const states = { idle: '空闲', use: '使用中', fault: '异常' };
 export const kinds = { borrow: '长期使用申请', add: '新增设备', edit: '修改设备', unit: '修改单件', return: '归还申请', fault: '异常申报' };
 export const outcomes = { pending: '待审核', approved: '已通过', rejected: '已驳回', cancelled: '已撤回' };
-export const purchaseLabels = { buyer: '购买人', purchasedOn: '购买日期', purchaseApprover: '购买审批人', fundingProject: '采购经费项目' };
+export const purchaseLabels = { buyer: '购买人', purchasedOn: '购买日期', purchaseApprover: '购买审批人',
+  fundingProject: '采购经费项目', unitPriceCents: '单价（元）' };
 export const deviceLabels = { title: '设备名称', count: '数量', location: '存放位置', project: '所属项目',
   managerId: '设备管理员', quickUse: '临时取用', note: '备注', ...purchaseLabels };
+export const loanKinds = { quick: '临时取用', long: '长期使用', manual: '管理员登记' };
+export const priceText = cents => Number.isSafeInteger(cents) && cents >= 0
+  ? Math.floor(cents / 100) + '.' + String(cents % 100).padStart(2, '0') : '';
+export function statDay(at) {
+  const time = typeof at === 'number' ? at : Date.parse(at);
+  return Number.isFinite(time) ? new Date(time + 8 * 3_600_000).toISOString().slice(0, 10) : '';
+}
 export const canReview = user => user.role === 'admin' || user.role === 'super';
 export const empty = () => ({ users: [], devices: [], requests: [], notices: [], history: [], seq: 0 });
 export const fail = (message, status = 400) => { throw Object.assign(new Error(message), { status }); };
@@ -37,12 +45,23 @@ function dateField(value, label) {
   return date;
 }
 
+function unitPrice(value) {
+  const text = field(typeof value === 'number' ? String(value) : value, '单价', 21, false);
+  if (!text) return null;
+  if (!/^\d+(?:\.\d{1,2})?$/.test(text)) fail('单价须为非负数字，最多保留两位小数');
+  const [integer, fraction = ''] = text.split('.');
+  const cents = Number(integer) * 100 + Number(fraction.padEnd(2, '0'));
+  if (!Number.isSafeInteger(cents)) fail('单价超出可记录范围');
+  return cents;
+}
+
 function procurement(p, defaults = {}) {
   return {
     buyer: field(p.buyer ?? defaults.buyer, purchaseLabels.buyer, 60),
     purchasedOn: dateField(p.purchasedOn ?? defaults.purchasedOn, purchaseLabels.purchasedOn),
     purchaseApprover: field(p.purchaseApprover ?? defaults.purchaseApprover, purchaseLabels.purchaseApprover, 60, false),
     fundingProject: field(p.fundingProject ?? defaults.fundingProject, purchaseLabels.fundingProject, 100, false),
+    unitPriceCents: own(p, 'unitPrice') ? unitPrice(p.unitPrice) : defaults.unitPriceCents ?? null,
   };
 }
 
@@ -109,8 +128,8 @@ function changeDevice(d, p) {
   d.version++;
 }
 
-function audit(s, user, action, target, detail = '') {
-  s.history.unshift({ ...stamp(), actor: user.name, actorId: user.id, action, target, detail });
+function audit(s, user, action, target, detail = '', usage) {
+  s.history.unshift({ ...stamp(), actor: user.name, actorId: user.id, action, target, detail, ...(usage ? { usage } : {}) });
 }
 
 function notice(s, recipient, title, detail, requestId) {
@@ -132,8 +151,10 @@ function unitDetailChanges(d, unit, changes) {
     const before = unit.purchase || d;
     const after = changes.purchase || d;
     for (const [key, label] of Object.entries(purchaseLabels)) {
-      if ((before[key] || '') !== (after[key] || '')) {
-        detail.push(label + '：' + (before[key] || '—') + ' → ' + (after[key] || '—'));
+      const previous = key === 'unitPriceCents' ? priceText(before[key]) : before[key] || '';
+      const next = key === 'unitPriceCents' ? priceText(after[key]) : after[key] || '';
+      if (previous !== next) {
+        detail.push(label + '：' + (previous || '—') + ' → ' + (next || '—'));
       }
     }
   }
@@ -151,7 +172,12 @@ function apply(s, user, kind, payload) {
     checkManager(s, p.managerId, d.managerId);
     const before = { ...d, count: units(d).length };
     changeDevice(d, p);
-    const display = (key, value) => key === 'quickUse' ? value ? '免审批' : '需审批' : key === 'managerId' ? name(s, value) || '—' : value || '—';
+    const display = (key, value) => {
+      if (key === 'quickUse') return value ? '免审批' : '需审批';
+      if (key === 'managerId') return name(s, value) || '—';
+      if (key === 'unitPriceCents') return priceText(value) || '—';
+      return value || '—';
+    };
     const changes = Object.keys(deviceLabels).filter(key => own(p, key) && display(key, before[key]) !== display(key, p[key]));
     return { target: targetOf(d), detail: changes.map(key => deviceLabels[key] + '：' + display(key, before[key]) + ' → ' + display(key, p[key])).join('；') || '保存设备资料' };
   }
@@ -227,7 +253,8 @@ export function mutate(s, user, action, body = {}) {
   const p = body || {};
   if (action === 'quick-borrow' || action === 'quick-return') {
     const result = apply(s, user, action, p);
-    audit(s, user, action === 'quick-borrow' ? '登记临时取用' : '登记临时归还', result.target, result.detail);
+    const usage = action === 'quick-borrow' ? { deviceId: p.deviceId, userId: user.id, mode: 'quick' } : undefined;
+    audit(s, user, action === 'quick-borrow' ? '登记临时取用' : '登记临时归还', result.target, result.detail, usage);
     return;
   }
   if (action === 'request') {
@@ -290,7 +317,8 @@ export function mutate(s, user, action, body = {}) {
       loanMode: sameLoan ? u.loanMode || '' : '', dueOn: sameLoan ? u.dueOn || '' : '' });
     const current = states[u.state] + (holder ? ' · ' + holder.name : '') + (issue ? ' · ' + issue : '');
     if (previous !== current) detail.unshift(previous + ' → ' + current);
-    audit(s, user, '修改单件', targetOf(d, u), detail.join('；') || '保存单件资料');
+    const usage = holder && !sameLoan ? { deviceId: d.id, userId: holder.id, mode: 'manual' } : undefined;
+    audit(s, user, '修改单件', targetOf(d, u), detail.join('；') || '保存单件资料', usage);
     return;
   }
   if (action === 'archive') {
@@ -341,6 +369,35 @@ export function mutate(s, user, action, body = {}) {
   fail('不支持的操作');
 }
 
+function usageByDay(s, user) {
+  const active = s.devices.filter(d => !d.archived);
+  const visible = new Set(active.map(d => d.id));
+  const deviceCode = new Map(active.map(d => [d.code, d.id]));
+  const buckets = new Map();
+  function count(deviceId, time, mode, holder) {
+    if (!visible.has(deviceId)) return;
+    const day = statDay(time);
+    if (!day) return;
+    const key = [deviceId, day, mode].join('|');
+    const row = buckets.get(key) || { deviceId, day, mode, count: 0, mine: 0 };
+    row.count++;
+    if (holder === user.id) row.mine++;
+    buckets.set(key, row);
+  }
+  for (const r of s.requests) {
+    if (r.kind === 'borrow' && r.status === 'approved') count(r.payload.deviceId, r.closed, 'long', r.authorId);
+  }
+  for (const entry of s.history) {
+    if (entry.usage) {
+      count(entry.usage.deviceId, entry.time, entry.usage.mode, entry.usage.userId);
+    } else if (entry.action === '登记临时取用') {
+      const group = entry.target?.match(/ \/ (EQ-\d+)-\d+$/)?.[1];
+      count(deviceCode.get(group), entry.time, 'quick', entry.actorId);
+    }
+  }
+  return [...buckets.values()];
+}
+
 export function view(s, user) {
   if (user.disabled) fail('该账号已停用', 403);
   const staff = canReview(user);
@@ -349,8 +406,9 @@ export function view(s, user) {
     managers: s.users.filter(u => !u.disabled && canReview(u)).map(({ id, name }) => ({ id, name })),
     devices: s.devices.filter(d => !d.archived || user.role === 'super')
       .map(d => ({ ...d, managerName: d.managerId ? name(s, d.managerId) : '', units: units(d).map(u => ({ ...u, userName: name(s, u.userId) })) })),
+    usage: usageByDay(s, user),
     requests: s.requests.filter(r => staff || r.authorId === user.id),
-    history: s.history.filter(h => staff || h.actorId === user.id),
+    history: s.history.filter(h => staff || h.actorId === user.id).map(({ usage, ...entry }) => entry),
     notices: s.notices.filter(n => n.recipient === user.id).map(n => ({
       ...n, pending: s.requests.some(r => r.id === n.requestId && r.status === 'pending'),
     })),

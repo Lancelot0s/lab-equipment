@@ -104,6 +104,26 @@ h1, h2, p { margin: 0; }
 .metric-number { font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif; font-size: 1.92rem; line-height: 1; font-weight: 730; letter-spacing: -.03em; margin-top: 9px; }
 .metric-number span { font: 650 .81rem "Microsoft YaHei UI", system-ui, sans-serif; color: var(--muted); letter-spacing: 0; }
 .metric-hint { font-size: .76rem; color: var(--muted); margin-top: 7px; }
+.usage-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 14px; margin-bottom: 14px; }
+.usage-select { display: grid; gap: 5px; color: #565247; font-size: .82rem; font-weight: 600; }
+.usage-select .select-wrap { min-width: 126px; }
+.usage-select select { width: 100%; max-width: 210px; }
+.usage-dates { align-self: end; padding: 0 0 9px; color: var(--muted); font-size: .82rem; }
+.usage-card:hover { border-color: var(--line); background: #fff; }
+.usage-panels { display: grid; grid-template-columns: minmax(0, 1fr) minmax(228px, 27%); align-items: start; gap: 14px; }
+.usage-ranking, .usage-panel { min-width: 0; }
+.usage-ranking .panel-heading, .usage-panel .panel-heading { min-height: 51px; }
+.usage-table .usage-total { min-width: 104px; }
+.usage-meter { display: block; width: 100%; height: 8px; appearance: none; border: 0; border-radius: 99px; background: #ece8de; overflow: hidden; }
+.usage-meter::-webkit-meter-bar { border: 0; border-radius: 99px; background: #ece8de; }
+.usage-meter::-webkit-meter-optimum-value { background: #ad7528; border-radius: 99px; }
+.usage-meter::-moz-meter-bar { background: #ad7528; border-radius: 99px; }
+.usage-total .usage-meter { margin-top: 6px; }
+.usage-series { display: grid; gap: 11px; padding: 3px 17px 17px; }
+.usage-series-row { display: grid; grid-template-columns: 42px minmax(0, 1fr) 42px; gap: 9px; align-items: center; font-size: .82rem; }
+.usage-series-row time { color: var(--muted); font-variant-numeric: tabular-nums; }
+.usage-series-row strong { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (max-width: 1120px) { .usage-panels { grid-template-columns: minmax(0, 1fr); } }
 .panel { background: #fff; border: 1px solid #e8e4da; border-radius: 11px; min-width: 0; }
 .panel-heading { padding: 15px 17px 9px; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .panel-heading > div { display: flex; align-items: center; gap: 9px; }
